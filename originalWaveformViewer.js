@@ -11,7 +11,6 @@ class OriginalWaveformViewer {
         this.dragType = null; // 'start' or 'end'
         this.onRangeChange = null; // コールバック関数
         this.hoverTopArea = false; // 上部30%エリアをホバーしているか
-        this.tailMode = null; // テール時間モード情報 { enabled: boolean, tailTime: number, useRangeEnd: number }
         
         this.setupEventListeners();
     }
@@ -96,15 +95,9 @@ class OriginalWaveformViewer {
         this.render();
     }
 
-    setRange(startTime, endTime, tailMode = null) {
+    setRange(startTime, endTime) {
         this.startTime = startTime;
         this.endTime = endTime;
-        this.tailMode = tailMode; // { enabled: boolean, tailTime: number, useRangeEnd: number }
-        this.render();
-    }
-    
-    setTailMode(tailMode) {
-        this.tailMode = tailMode;
         this.render();
     }
 
@@ -381,25 +374,6 @@ class OriginalWaveformViewer {
         
         // 範囲指定UIを描画
         this.drawRangeUI(ctx, startX, endX, height, timeScale);
-        
-        // テール時間モードの時に、トラック2が利用する波形分（利用範囲の右側）のエンド位置に緑の線を描画
-        if (this.tailMode && this.tailMode.enabled && this.tailMode.tailTime > 0) {
-            const track2EndTime = this.tailMode.useRangeEnd + this.tailMode.tailTime;
-            if (track2EndTime >= 0 && track2EndTime <= duration) {
-                const track2EndX = track2EndTime * timeScale;
-                ctx.strokeStyle = '#00ff00';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(track2EndX, 0);
-                ctx.lineTo(track2EndX, height);
-                ctx.stroke();
-                
-                // ラベル
-                ctx.fillStyle = '#00ff00';
-                ctx.font = '12px sans-serif';
-                ctx.fillText('Track2 End', track2EndX + 5, 30);
-            }
-        }
         
         // タイムルーラーを描画
         this.drawTimeRuler(duration, width);
