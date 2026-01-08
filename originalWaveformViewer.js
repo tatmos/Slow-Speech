@@ -93,12 +93,14 @@ class OriginalWaveformViewer {
             this.endTime = audioBuffer.duration;
         }
         this.render();
+        this.updateRangeDuration();
     }
 
     setRange(startTime, endTime) {
         this.startTime = startTime;
         this.endTime = endTime;
         this.render();
+        this.updateRangeDuration();
     }
 
     getRange() {
@@ -375,8 +377,19 @@ class OriginalWaveformViewer {
         // 範囲指定UIを描画
         this.drawRangeUI(ctx, startX, endX, height, timeScale);
         
+        // 選択範囲の尺を表示
+        this.updateRangeDuration();
+        
         // タイムルーラーを描画
         this.drawTimeRuler(duration, width);
+    }
+
+    updateRangeDuration() {
+        const rangeDurationElement = document.getElementById('range-duration');
+        if (rangeDurationElement) {
+            const rangeDuration = this.endTime - this.startTime;
+            rangeDurationElement.textContent = `選択範囲: ${rangeDuration.toFixed(2)}秒`;
+        }
     }
 
     drawRangeUI(ctx, startX, endX, height, timeScale) {

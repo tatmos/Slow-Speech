@@ -11,6 +11,10 @@ class SlowSpeech {
         this.animationFrameId = null;
         this.useRangeStart = 0; // 利用範囲の開始位置
         this.useRangeEnd = 0; // 利用範囲の終了位置
+        this.playbackRate = 0.7; // 再生レート（初期値0.7倍速）
+        this.resampleAlgorithm = 'simple'; // リサンプリングアルゴリズム（初期値：シンプルにリサンプル）
+        this.currentAlgorithm = null; // 現在のアルゴリズムインスタンス
+        this.originalDuration = 0; // 元の利用範囲の長さ（秒）
         
         this.initializeElements();
         this.uiController = new UIController(this);
@@ -23,17 +27,17 @@ class SlowSpeech {
         const processedRuler = document.getElementById('ruler-processed');
         
         this.originalWaveformViewer = new OriginalWaveformViewer(originalCanvas, originalRuler);
-        this.originalWaveformViewer.onRangeChange = (startTime, endTime) => {
+        this.originalWaveformViewer.onRangeChange = async (startTime, endTime) => {
             this.useRangeStart = startTime;
             this.useRangeEnd = endTime;
-            this.updateBuffers();
+            await this.updateBuffers();
             this.drawWaveforms();
         };
         
         this.waveformRenderer = new WaveformRenderer(processedCanvas, processedRuler);
     }
 
-    updateBuffers() {
+    async updateBuffers() {
         if (!this.originalBuffer || !this.audioProcessor) return;
         
         // 再生中の場合、現在の再生位置を保持
@@ -50,9 +54,24 @@ class SlowSpeech {
             this.useRangeEnd
         );
         
-        // TODO: ここでリサンプリング処理を実装する
-        // 今は元波形をそのまま使用
-        this.processedBuffer = useRangeBuffer;
+        // 元の利用範囲の長さを保存
+        this.originalDuration = useRangeBuffer.duration;
+        
+        // アルゴリズムインスタンスを取得または作成
+        if (!this.currentAlgorithm) {
+            this.currentAlgorithm = ResampleAlgorithmFactory.create(this.resampleAlgorithm, this.audioContext);
+        }
+        
+        // リサンプリング処理
+        this.processedBuffer = await this.currentAlgorithm.process(useRangeBuffer, this.playbackRate);
+        
+        // デバッグ用：リサンプリング後のバッファの長さを確認
+        if (this.processedBuffer) {
+            console.log('元の利用範囲の長さ:', useRangeBuffer.duration, '秒');
+            console.log('リサンプリング後の長さ:', this.processedBuffer.duration, '秒');
+            console.log('再生レート:', this.playbackRate);
+            console.log('アルゴリズム:', this.currentAlgorithm.getName());
+        }
         
         // 再生中だった場合、新しいバッファで再生を再開
         if (wasPlaying && this.audioPlayer && this.processedBuffer) {
@@ -84,7 +103,7 @@ class SlowSpeech {
         if (!this.processedBuffer || !this.waveformRenderer) return;
         
         const currentTime = this.audioPlayer ? this.audioPlayer.getCurrentPlaybackTime() : null;
-        this.waveformRenderer.render(this.processedBuffer, currentTime);
+        this.waveformRenderer.render(this.processedBuffer, currentTime, this.originalDuration);
     }
 
     startPlaybackAnimation() {

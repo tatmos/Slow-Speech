@@ -21,6 +21,9 @@ class AudioPlayer {
             
             const source = this.audioContext.createBufferSource();
             source.buffer = audioBuffer;
+            source.loop = true; // ループ再生を有効化
+            source.loopStart = 0;
+            source.loopEnd = audioBuffer.duration;
             source.connect(this.audioContext.destination);
             
             this.sourceNode = source;

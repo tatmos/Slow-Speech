@@ -84,6 +84,64 @@ class AudioProcessor {
         return arrayBuffer;
     }
 
+    // リサンプリング処理
+    // playbackRate: 再生レート（0.7 = 0.7倍速、1.0 = 等倍、2.0 = 2倍速）
+    async resample(audioBuffer, playbackRate) {
+        if (!audioBuffer || playbackRate <= 0) {
+            return audioBuffer;
+        }
+
+        // 再生レートが1.0の場合はそのまま返す
+        if (Math.abs(playbackRate - 1.0) < 0.001) {
+            return audioBuffer;
+        }
+
+        const originalSampleRate = audioBuffer.sampleRate;
+        const numChannels = audioBuffer.numberOfChannels;
+        const originalDuration = audioBuffer.duration;
+        const originalLength = audioBuffer.length;
+        
+        // 新しいバッファの長さを計算（再生レートが0.7の場合、長さは1/0.7倍になる）
+        // 正確な長さを計算するため、元のサンプル数を基準にする
+        const newLength = Math.floor(originalLength / playbackRate);
+        const newSampleRate = originalSampleRate;
+        const newDuration = newLength / newSampleRate;
+
+        // 新しいバッファを作成
+        const resampledBuffer = this.audioContext.createBuffer(
+            numChannels,
+            newLength,
+            newSampleRate
+        );
+
+        // 各チャンネルをリサンプリング
+        for (let channel = 0; channel < numChannels; channel++) {
+            const inputData = audioBuffer.getChannelData(channel);
+            const outputData = resampledBuffer.getChannelData(channel);
+
+            for (let i = 0; i < newLength; i++) {
+                // 元のバッファでの位置を計算
+                // 新しいバッファの位置iに対応する元のバッファの位置を計算
+                // 新しいバッファが長いので、元のバッファの位置は i * playbackRate で計算
+                const sourcePosition = i * playbackRate;
+                const sourceIndex = Math.floor(sourcePosition);
+                const fraction = sourcePosition - sourceIndex;
+
+                // 線形補間
+                if (sourceIndex + 1 < inputData.length) {
+                    outputData[i] = inputData[sourceIndex] * (1 - fraction) + 
+                                   inputData[sourceIndex + 1] * fraction;
+                } else if (sourceIndex < inputData.length) {
+                    outputData[i] = inputData[sourceIndex];
+                } else {
+                    outputData[i] = 0;
+                }
+            }
+        }
+
+        return resampledBuffer;
+    }
+
     // バッファを保存
     saveBuffer(buffer, filename = 'output.wav') {
         const wav = this.bufferToWav(buffer);

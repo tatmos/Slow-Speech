@@ -16,6 +16,9 @@ class UIController {
         this.dropOverlay = document.getElementById('drop-overlay');
         this.processedWaveform = document.getElementById('processed-waveform');
         this.filenameInput = document.getElementById('filename-input');
+        this.playbackRateSlider = document.getElementById('playback-rate');
+        this.playbackRateValue = document.getElementById('playback-rate-value');
+        this.resampleAlgorithmSelect = document.getElementById('resample-algorithm');
     }
 
     setupEventListeners() {
@@ -23,6 +26,14 @@ class UIController {
         this.saveBtn.addEventListener('click', () => this.saveFile());
         this.playBtn.addEventListener('click', () => this.playPreview());
         this.stopBtn.addEventListener('click', () => this.stopPreview());
+        
+        if (this.playbackRateSlider) {
+            this.playbackRateSlider.addEventListener('input', (e) => this.handlePlaybackRateChange(e));
+        }
+        
+        if (this.resampleAlgorithmSelect) {
+            this.resampleAlgorithmSelect.addEventListener('change', (e) => this.handleAlgorithmChange(e));
+        }
 
         if (this.dropZone) {
             ['dragenter', 'dragover'].forEach(evt => {
@@ -138,7 +149,7 @@ class UIController {
             }
             
             // バッファを生成
-            this.slowSpeech.updateBuffers();
+            await this.slowSpeech.updateBuffers();
             
             this.slowSpeech.drawWaveforms();
             this.enableControls();
@@ -257,11 +268,36 @@ class UIController {
         }
     }
 
+    async handlePlaybackRateChange(event) {
+        const rate = parseFloat(event.target.value);
+        this.slowSpeech.playbackRate = rate;
+        if (this.playbackRateValue) {
+            this.playbackRateValue.textContent = rate.toFixed(2);
+        }
+        await this.slowSpeech.updateBuffers();
+        this.slowSpeech.drawWaveforms();
+    }
+
+    async handleAlgorithmChange(event) {
+        const algorithm = event.target.value;
+        this.slowSpeech.resampleAlgorithm = algorithm;
+        // アルゴリズムインスタンスを再作成
+        this.slowSpeech.currentAlgorithm = null;
+        await this.slowSpeech.updateBuffers();
+        this.slowSpeech.drawWaveforms();
+    }
+
     enableControls() {
         this.saveBtn.disabled = false;
         this.playBtn.disabled = false;
         if (this.filenameInput) {
             this.filenameInput.disabled = false;
+        }
+        if (this.playbackRateSlider) {
+            this.playbackRateSlider.disabled = false;
+        }
+        if (this.resampleAlgorithmSelect) {
+            this.resampleAlgorithmSelect.disabled = false;
         }
     }
 
