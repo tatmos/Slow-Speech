@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LoopMaker - 誰でも簡単に使えるループ波形エディタ</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>LoopMaker</h1>
+            <p class="subtitle">誰でも簡単に使えるループ波形エディタ by <a href="https://github.com/sponsors/tatmos">tatmos</a></p>
+            <div class="app-version">v1.3.1</div>
+        </header>
+
+        <div class="controls-panel">
+            <div class="file-controls">
+                <label for="file-input" class="btn btn-primary">
+                    <!-- iOS系ブラウザでwav/mp3がグレーアウトしないように拡張子も明示 -->
+                    <input type="file" id="file-input" accept=".wav,.mp3,audio/*" hidden>
+                    波形をアップロード
+                </label>
+                <button id="save-btn" class="btn btn-secondary" disabled>ファイル保存</button>
+                <input type="text" id="filename-input" class="filename-input" placeholder="loopmaker_output.wav" value="loopmaker_output.wav" disabled>
+            </div>
+
+            <div class="playback-controls">
+                <button id="play-btn" class="btn btn-play" disabled>▶ 再生</button>
+                <button id="stop-btn" class="btn btn-stop" disabled>■ 停止</button>
+            </div>
+        </div>
+
+        <div class="waveform-container">
+            <div class="original-waveform-container">
+                <div class="track-header">
+                    <div class="track-label">元波形（利用範囲指定）</div>
+                    <button id="range-detail-btn" class="btn btn-small" disabled>詳細設定</button>
+                </div>
+                <div class="waveform-wrapper drop-zone" id="original-drop-zone">
+                    <div class="drop-overlay" id="drop-overlay">波形をアップロード</div>
+                    <canvas id="original-waveform" class="waveform-canvas"></canvas>
+                    <canvas id="fade-ui-original" class="fade-ui-canvas"></canvas>
+                </div>
+                <div id="ruler-original" class="time-ruler"></div>
+                <div id="range-detail-container" class="range-detail-container hidden">
+                    <div class="range-detail-header">
+                        <h3>範囲詳細設定</h3>
+                        <div class="bpm-controls">
+                            <button id="bpm-estimate-btn" class="range-detail-btn">BPM推定</button>
+                            <label class="bpm-label">
+                                BPM
+                                <input type="number" id="bpm-input" class="bpm-input" min="20" max="300" step="0.001" value="120.000">
+                            </label>
+                            <label class="bpm-timesig">
+                                拍子
+                                <input type="number" id="timesig-numerator" class="timesig-input" min="1" max="16" step="1" value="4"> /
+                                <input type="number" id="timesig-denominator" class="timesig-input" min="1" max="16" step="1" value="4">
+                            </label>
+                            <label class="bpm-toggle">
+                                <input type="checkbox" id="bpm-enable">
+                                BPM指定
+                            </label>
+                            <label class="bpm-toggle">
+                                <input type="checkbox" id="metronome-enable">
+                                メトロノームを有効
+                            </label>
+                        </div>
+                        <button id="range-detail-close" class="btn btn-small">閉じる</button>
+                    </div>
+                    <div class="range-detail-views">
+                        <div class="range-detail-view">
+                            <div class="range-detail-label">
+                                開始位置
+                                <div class="range-detail-controls">
+                                    <button id="range-detail-start-minus-01" class="range-detail-btn">-0.1s</button>
+                                    <button id="range-detail-start-plus-01" class="range-detail-btn">+0.1s</button>
+                                    <button id="range-detail-start-minus-001" class="range-detail-btn">-0.01s</button>
+                                    <button id="range-detail-start-plus-001" class="range-detail-btn">+0.01s</button>
+                                    <button id="range-detail-start-minus-beat" class="range-detail-btn">-1Beat</button>
+                                    <button id="range-detail-start-plus-beat" class="range-detail-btn">+1Beat</button>
+                                    <button id="range-detail-start-minus-sample" class="range-detail-btn">-1Sample</button>
+                                    <button id="range-detail-start-plus-sample" class="range-detail-btn">+1Sample</button>
+                                </div>
+                            </div>
+                            <canvas id="range-detail-start" class="range-detail-canvas"></canvas>
+                            <div id="ruler-detail-start" class="time-ruler"></div>
+                        </div>
+                        <div class="range-detail-view">
+                            <div class="range-detail-label">
+                                終了位置
+                                <div class="range-detail-controls">
+                                    <button id="range-detail-end-minus-01" class="range-detail-btn">-0.1s</button>
+                                    <button id="range-detail-end-plus-01" class="range-detail-btn">+0.1s</button>
+                                    <button id="range-detail-end-minus-001" class="range-detail-btn">-0.01s</button>
+                                    <button id="range-detail-end-plus-001" class="range-detail-btn">+0.01s</button>
+                                    <button id="range-detail-end-minus-beat" class="range-detail-btn">-1Beat</button>
+                                    <button id="range-detail-end-plus-beat" class="range-detail-btn">+1Beat</button>
+                                    <button id="range-detail-end-minus-sample" class="range-detail-btn">-1Sample</button>
+                                    <button id="range-detail-end-plus-sample" class="range-detail-btn">+1Sample</button>
+                                </div>
+                            </div>
+                            <canvas id="range-detail-end" class="range-detail-canvas"></canvas>
+                            <div id="ruler-detail-end" class="time-ruler"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="track-container">
+                <div class="track-sidebar">
+                    <div id="level-meter-track1" class="level-meter">
+                        <div class="level-bar"></div>
+                    </div>
+                    <button id="mute-track1" class="speaker-btn" title="トラック1のミュート (M)">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M11 5L6 9H2v6h4l5 4V5z"></path>
+                            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="track-content">
+                    <div class="track-header">
+                        <div class="track-label">トラック1（フェードイン）</div>
+                    </div>
+                    <div class="waveform-wrapper">
+                        <canvas id="waveform-track1" class="waveform-canvas"></canvas>
+                        <canvas id="fade-ui-track1" class="fade-ui-canvas"></canvas>
+                    </div>
+                    <div id="ruler-track1" class="time-ruler"></div>
+                </div>
+            </div>
+
+            <div class="track-container">
+                <div class="track-sidebar">
+                    <div id="level-meter-track2" class="level-meter">
+                        <div class="level-bar"></div>
+                    </div>
+                    <button id="mute-track2" class="speaker-btn" title="トラック2のミュート (M)">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M11 5L6 9H2v6h4l5 4V5z"></path>
+                            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="track-content">
+                    <div class="track-header">
+                        <div class="track-label">トラック2（フェードアウト）</div>
+                    </div>
+                    <div class="waveform-wrapper">
+                        <canvas id="waveform-track2" class="waveform-canvas"></canvas>
+                        <canvas id="fade-ui-track2" class="fade-ui-canvas"></canvas>
+                    </div>
+                    <div id="ruler-track2" class="time-ruler"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="loop-controls">
+            <div class="loop-info">
+                <label for="loop-algorithm">ループアルゴリズム:</label>
+                <select id="loop-algorithm" class="algorithm-select" disabled>
+                    <option value="overlap">オーバーラップ率</option>
+                    <option value="tail">テール時間</option>
+                </select>
+            </div>
+            
+            <!-- オーバーラップ率UI -->
+            <div id="overlap-rate-ui" class="algorithm-ui">
+                <div class="loop-info">
+                    <label for="overlap-rate">オーバーラップ率:</label>
+                    <span id="overlap-rate-value">0%</span>
+                </div>
+                <div class="slider-container">
+                    <input type="range" id="overlap-rate" class="slider" min="0" max="50" value="0" disabled>
+                    <div class="slider-labels">
+                        <span>0%</span>
+                        <span>50%</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- テール時間UI -->
+            <div id="tail-time-ui" class="algorithm-ui hidden">
+                <div class="loop-info">
+                    <label for="tail-time">テール時間:</label>
+                    <span id="tail-time-value">0.00s</span>
+                </div>
+                <div class="slider-container">
+                    <input type="range" id="tail-time" class="slider" min="0" max="10" step="0.01" value="0" disabled>
+                    <div id="tail-time-ruler" class="time-ruler tail-time-ruler"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="status" class="status"></div>
+        
+        <!-- ファイル上書き確認ダイアログ -->
+        <div id="overwrite-dialog" class="overwrite-dialog hidden">
+            <div class="overwrite-dialog-content">
+                <h3>ファイルが既に存在します</h3>
+                <p id="overwrite-filename" class="overwrite-filename"></p>
+                <div class="overwrite-buttons">
+                    <button id="overwrite-confirm" class="btn btn-secondary">上書き</button>
+                    <button id="overwrite-rename" class="btn btn-primary">別名で保存</button>
+                    <button id="overwrite-cancel" class="btn btn-secondary">キャンセル</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="waveformDrawer.js"></script>
+    <script src="waveformRenderer.js"></script>
+    <script src="fadeCurves.js"></script>
+    <script src="track1Processor.js"></script>
+    <script src="track2Processor.js"></script>
+    <script src="audioPlayer.js"></script>
+    <script src="audioProcessor.js"></script>
+    <script src="loopAlgorithm.js"></script>
+    <script src="originalWaveformViewer.js"></script>
+    <script src="fadeUIController.js"></script>
+    <script src="rangeDetailController.js"></script>
+    <script src="uiController.js"></script>
+    <script src="overlapRateController.js"></script>
+    <script src="tailTimeController.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
+
