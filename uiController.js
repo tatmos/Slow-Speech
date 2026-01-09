@@ -38,6 +38,9 @@ class UIController {
         this.processedLevelBar = document.getElementById('processed-level-bar');
         this.originalLevelMeter = document.getElementById('original-level-meter');
         this.processedLevelMeter = document.getElementById('processed-level-meter');
+        this.correctionProgressContainer = document.getElementById('correction-progress-container');
+        this.correctionProgressBar = document.getElementById('correction-progress-bar');
+        this.correctionProgressText = document.getElementById('correction-progress-text');
     }
 
     setupEventListeners() {
@@ -589,24 +592,64 @@ class UIController {
             return;
         }
 
-        // 反復的に補正を試みる（最大5回）
+        // ボタンを無効化して、処理開始を表示
+        if (this.adjustCutRatioBtn) {
+            this.adjustCutRatioBtn.disabled = true;
+        }
+        this.showStatus('補正を開始します...', 'info');
+
+        // プログレスバーを表示
+        if (this.correctionProgressContainer) {
+            this.correctionProgressContainer.classList.remove('hidden');
+        }
+        this.updateProgress(0, '補正開始...');
+
+        // UIを更新するために少し待つ（ブラウザに描画の機会を与える）
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        try {
+
+        // 2分岐的補正アルゴリズム（バイナリサーチ風）
         let originalMinSilenceRate = algorithm.minSilenceRate;
         let originalMaxSilenceRate = algorithm.maxSilenceRate;
         let originalCorrectionStrength = algorithm.silenceCorrectionStrength;
         let newMinSilenceRate = originalMinSilenceRate;
         let newMaxSilenceRate = originalMaxSilenceRate;
         let newCorrectionStrength = originalCorrectionStrength;
-        const maxIterations = 5;
-        const tolerance = 0.05; // 許容誤差（秒）
+        const maxIterations = 15;
+        const tolerance = 0.01; // 許容誤差（秒）
+
+        // 初回の現在の状態を確認
+        await this.slowSpeech.updateBuffers();
+        let previousDuration = this.slowSpeech.processedBuffer ? this.slowSpeech.processedBuffer.duration : targetDuration;
+        let previousDiff = previousDuration - targetDuration;
+        let wasTooLong = previousDiff > 0; // 前回が長すぎたかどうか
+        
+        // 初期の差を記録（プログレス計算用）
+        const initialDiff = Math.abs(previousDiff);
+        let bestDiff = initialDiff; // これまでで最も良い（小さい）差
 
         for (let iteration = 0; iteration < maxIterations; iteration++) {
+            // 反復開始時にプログレスを更新（反復回数ベースの最小値）
+            const minProgressPercent = ((iteration + 1) / maxIterations) * 50; // 最低でも50%まで
+            this.updateProgress(minProgressPercent, `補正中... (${iteration + 1}/${maxIterations}) 設定を更新中...`);
+
             // 無音部分の再生レート倍率と補正の強さを設定
             algorithm.setCutRatios(newMinSilenceRate, newMaxSilenceRate);
             algorithm.setSilenceCorrectionStrength(newCorrectionStrength);
             this.updateCutRatioDisplay();
 
+            // ブラウザに描画の機会を与える
+            await new Promise(resolve => setTimeout(resolve, 10));
+
+            // プログレスを更新
+            this.updateProgress(minProgressPercent + 5, `補正中... (${iteration + 1}/${maxIterations}) バッファを再生成中...`);
+
             // バッファを再生成
             await this.slowSpeech.updateBuffers();
+            
+            // ブラウザに描画の機会を与える
+            await new Promise(resolve => setTimeout(resolve, 10));
             
             if (!this.slowSpeech.processedBuffer) {
                 break;
@@ -614,25 +657,75 @@ class UIController {
 
             const processedDuration = this.slowSpeech.processedBuffer.duration;
             const durationDiff = processedDuration - targetDuration;
-            const diffRatio = durationDiff / targetDuration; // 相対的な差
+            const currentDiff = Math.abs(durationDiff);
+            const diffRatio = Math.abs(durationDiff / targetDuration); // 相対的な差（絶対値）
+            
+            // 目標への近づき具合に基づいてプログレスを計算
+            // 初期差から現在の差への改善率を計算
+            let progressPercent = minProgressPercent;
+            if (initialDiff > tolerance) {
+                // 改善率 = (初期差 - 現在の差) / 初期差
+                const improvement = Math.max(0, Math.min(1, (initialDiff - currentDiff) / initialDiff));
+                // プログレスは改善率に基づいて計算（最低minProgressPercent、最高95%）
+                const improvementProgress = improvement * (95 - minProgressPercent);
+                progressPercent = minProgressPercent + improvementProgress;
+            } else {
+                // 初期差が既に小さい場合は、反復回数ベース
+                progressPercent = ((iteration + 1) / maxIterations) * 95;
+            }
+            
+            // これまでで最も良い差を更新
+            if (currentDiff < bestDiff) {
+                bestDiff = currentDiff;
+            }
+            
+            // プログレスバーを更新
+            this.updateProgress(progressPercent, `補正中... (${iteration + 1}/${maxIterations}) 残り: ${currentDiff.toFixed(2)}秒`);
 
             // 目標の長さに十分近い場合は終了
-            if (Math.abs(durationDiff) < tolerance) {
+            if (currentDiff < tolerance) {
+                this.updateProgress(100, '補正完了！');
                 this.showStatus('目標の長さに補正しました', 'success');
                 this.slowSpeech.drawWaveforms();
+                // 少し待ってからプログレスバーを非表示
+                setTimeout(() => {
+                    if (this.correctionProgressContainer) {
+                        this.correctionProgressContainer.classList.add('hidden');
+                    }
+                }, 1000);
+                // ボタンを再有効化
+                if (this.adjustCutRatioBtn) {
+                    this.adjustCutRatioBtn.disabled = false;
+                }
                 return;
             }
 
-            // 再生レート倍率と補正の強さを調整
-            if (durationDiff > 0) {
-                // 目標より長い場合：最大再生レート倍率を上げる、または補正の強さを上げる（無音部分をより短縮）
-                // 差が大きいほど大きく上げる
-                const increaseAmount = Math.min(diffRatio * 0.8, 0.5); // 最大0.5まで上げる
-                newMaxSilenceRate = Math.min(256.0, newMaxSilenceRate + increaseAmount);
-                // 補正の強さも上げる（より積極的にカット）
-                // 補正の強さは1.0を超える値も許可（上限を撤廃）
-                const strengthIncrease = Math.min(diffRatio * 0.5, 0.3); // 増加量を大きく（最大0.3まで）
-                newCorrectionStrength = newCorrectionStrength + strengthIncrease; // 上限チェックを削除（1.0を超える値も許可）
+            // 2分岐的補正アルゴリズム
+            const isTooLong = durationDiff > 0;
+            const isOvershot = (wasTooLong && !isTooLong) || (!wasTooLong && isTooLong); // 目標値を超えてしまったか
+
+            // 調整前に前回の値を保存
+            const previousMaxSilenceRate = newMaxSilenceRate;
+            const previousCorrectionStrength = newCorrectionStrength;
+
+            if (isTooLong) {
+                // 目標より長い場合：大きく上げる（256倍まで）
+                if (isOvershot && iteration > 0) {
+                    // 目標値を超えてしまった場合は、前回の値と現在の値の中間を取る
+                    newMaxSilenceRate = Math.min(256.0, (newMaxSilenceRate + previousMaxSilenceRate) / 2);
+                    newCorrectionStrength = (newCorrectionStrength + previousCorrectionStrength) / 2;
+                } else {
+                    // 初回またはまだ足りない場合：大きく上げる
+                    // 差が大きいほど、より大きく上げる
+                    const aggressiveFactor = iteration === 0 ? 10.0 : (iteration < 3 ? 5.0 : 2.0); // 初回は10倍、3回目まで5倍、それ以降2倍
+                    const increaseAmount = Math.min(diffRatio * aggressiveFactor * 50.0, 200.0); // 最大200.0まで上げる
+                    newMaxSilenceRate = Math.min(256.0, newMaxSilenceRate + increaseAmount);
+                    
+                    // 補正の強さも大きく上げる
+                    const strengthIncrease = Math.min(diffRatio * aggressiveFactor * 2.0, 2.0); // 最大2.0まで
+                    newCorrectionStrength = newCorrectionStrength + strengthIncrease;
+                }
+                
                 // 補正の強さの表示値は1.0に制限（UI表示用）
                 const displayStrength = Math.min(newCorrectionStrength, 1.0);
                 if (this.silenceCorrectionStrengthSlider) {
@@ -646,19 +739,41 @@ class UIController {
                         this.silenceCorrectionStrengthValue.textContent = newCorrectionStrength.toFixed(2);
                     }
                 }
-                this.showStatus(`補正中... (${(iteration + 1)}/${maxIterations}) 最大再生レート倍率と補正の強さを上げています`, 'info');
+                
+                // プログレスは既に更新済み
             } else {
-                // 目標より短い場合：再生レート倍率を下げる、または補正の強さを下げる（より多く無音部分を保持）
-                // ただし、無音部分が少ない場合は調整できないため、再生レート倍率と補正の強さを下げるだけで対処
-                // 差が大きいほど大きく下げる
-                const decreaseAmount = Math.min(Math.abs(diffRatio) * 0.8, 0.5); // 最大0.5まで下げる
-                newMinSilenceRate = Math.max(1.0, newMinSilenceRate - decreaseAmount);
-                newMaxSilenceRate = Math.max(newMinSilenceRate, newMaxSilenceRate - decreaseAmount);
-                // 補正の強さも下げる（より控えめにカット）
-                const strengthDecrease = Math.min(Math.abs(diffRatio) * 0.3, 0.2); // 最大0.2まで下げる
-                newCorrectionStrength = Math.max(0.0, newCorrectionStrength - strengthDecrease);
-                this.showStatus(`補正中... (${(iteration + 1)}/${maxIterations}) 再生レート倍率と補正の強さを下げています`, 'info');
+                // 目標より短い場合：半分に下げる
+                if (isOvershot && iteration > 0) {
+                    // 目標値を超えてしまった場合は、前回の値と現在の値の中間を取る
+                    newMaxSilenceRate = Math.max(newMinSilenceRate, (newMaxSilenceRate + previousMaxSilenceRate) / 2);
+                    newCorrectionStrength = (newCorrectionStrength + previousCorrectionStrength) / 2;
+                } else {
+                    // 初回またはまだ短い場合：半分に下げる
+                    newMaxSilenceRate = Math.max(newMinSilenceRate, newMaxSilenceRate / 2);
+                    // 補正の強さも半分に下げる
+                    newCorrectionStrength = Math.max(0.0, newCorrectionStrength / 2);
+                }
+                
+                // 補正の強さの表示値を更新
+                const displayStrength = Math.min(newCorrectionStrength, 1.0);
+                if (this.silenceCorrectionStrengthSlider) {
+                    this.silenceCorrectionStrengthSlider.value = displayStrength.toFixed(2);
+                }
+                if (this.silenceCorrectionStrengthValue) {
+                    if (newCorrectionStrength > 1.0) {
+                        this.silenceCorrectionStrengthValue.textContent = `1.0+ (${newCorrectionStrength.toFixed(2)})`;
+                    } else {
+                        this.silenceCorrectionStrengthValue.textContent = newCorrectionStrength.toFixed(2);
+                    }
+                }
+                
+                // プログレスは既に更新済み
             }
+
+            // 次回の反復用に前回の状態を保存
+            previousDuration = processedDuration;
+            previousDiff = durationDiff;
+            wasTooLong = isTooLong;
 
             // 再生レート倍率の範囲をチェック
             if (newMinSilenceRate >= newMaxSilenceRate) {
@@ -675,6 +790,10 @@ class UIController {
         algorithm.setMaxSilenceRate(newMaxSilenceRate);
         this.updateCutRatioDisplay();
         this.slowSpeech.drawWaveforms();
+        
+        // プログレスバーを更新
+        this.updateProgress(100, '補正完了');
+        
         if (this.slowSpeech.processedBuffer) {
             const finalDuration = this.slowSpeech.processedBuffer.duration;
             const finalDiff = Math.abs(finalDuration - targetDuration);
@@ -683,6 +802,36 @@ class UIController {
             } else {
                 this.showStatus(`補正しました（残差: ${finalDiff.toFixed(2)}秒）`, 'info');
             }
+        }
+        
+        // 少し待ってからプログレスバーを非表示
+        setTimeout(() => {
+            if (this.correctionProgressContainer) {
+                this.correctionProgressContainer.classList.add('hidden');
+            }
+        }, 1000);
+
+        } catch (error) {
+            // エラーが発生した場合もボタンを再有効化
+            console.error('補正エラー:', error);
+            this.showStatus('補正中にエラーが発生しました: ' + error.message, 'error');
+            if (this.correctionProgressContainer) {
+                this.correctionProgressContainer.classList.add('hidden');
+            }
+        } finally {
+            // 必ずボタンを再有効化
+            if (this.adjustCutRatioBtn) {
+                this.adjustCutRatioBtn.disabled = false;
+            }
+        }
+    }
+
+    updateProgress(percent, text) {
+        if (this.correctionProgressBar) {
+            this.correctionProgressBar.style.width = Math.min(100, Math.max(0, percent)) + '%';
+        }
+        if (this.correctionProgressText) {
+            this.correctionProgressText.textContent = text || '補正中...';
         }
     }
 

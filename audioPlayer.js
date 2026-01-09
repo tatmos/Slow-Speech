@@ -185,4 +185,16 @@ class AudioPlayer {
         const elapsed = this.audioContext.currentTime - this.startTime;
         return elapsed % this.processedSourceNode.buffer.duration;
     }
+
+    // 元波形の現在の再生位置を取得
+    getOriginalPlaybackTime() {
+        if (!this.isPlaying || this.startTime === null || !this.originalSourceNode || !this.originalSourceNode.buffer) {
+            return null;
+        }
+        // 元波形のソースノードの開始時刻を計算
+        // 加工後の波形と同期しているため、同じstartTimeを使用
+        const elapsed = this.audioContext.currentTime - this.startTime;
+        // 元波形のバッファの長さでループ
+        return elapsed % this.originalSourceNode.buffer.duration;
+    }
 }

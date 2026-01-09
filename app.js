@@ -124,6 +124,23 @@ class SlowSpeech {
         
         const currentTime = this.audioPlayer ? this.audioPlayer.getCurrentPlaybackTime() : null;
         this.waveformRenderer.render(this.processedBuffer, currentTime, this.originalDuration, this.rateHistory);
+        
+        // 元波形の再生位置を表示（ミュートでない場合のみ）
+        if (this.originalWaveformViewer && this.audioPlayer) {
+            // 元波形がミュートでない場合のみ再生位置を表示
+            if (!this.audioPlayer.originalMuted && this.audioPlayer.isPlaying) {
+                const originalTime = this.audioPlayer.getOriginalPlaybackTime();
+                if (originalTime !== null) {
+                    // 元波形全体のバッファでの位置を計算（利用範囲を考慮）
+                    const originalTimeInFullBuffer = this.useRangeStart + originalTime;
+                    this.originalWaveformViewer.render(originalTimeInFullBuffer);
+                } else {
+                    this.originalWaveformViewer.render(null);
+                }
+            } else {
+                this.originalWaveformViewer.render(null);
+            }
+        }
     }
 
     startPlaybackAnimation() {

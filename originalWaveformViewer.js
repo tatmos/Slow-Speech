@@ -257,7 +257,7 @@ class OriginalWaveformViewer {
         }
     }
 
-    render() {
+    render(currentPlaybackTime = null) {
         if (!this.audioBuffer) return;
         
         const width = this.canvas.width = this.canvas.offsetWidth;
@@ -379,9 +379,29 @@ class OriginalWaveformViewer {
         
         // 選択範囲の尺を表示
         this.updateRangeDuration();
-        
+
+        // 再生位置ラインを描画（ミュートでない場合のみ）
+        if (currentPlaybackTime !== null && currentPlaybackTime >= 0) {
+            this.drawPlaybackPosition(currentPlaybackTime, duration, width, height);
+        }
+
         // タイムルーラーを描画
         this.drawTimeRuler(duration, width);
+    }
+
+    drawPlaybackPosition(currentTime, totalDuration, width, height) {
+        if (totalDuration <= 0) return;
+
+        const timeScale = width / totalDuration;
+        const x = (currentTime % totalDuration) * timeScale;
+
+        const ctx = this.ctx;
+        ctx.strokeStyle = '#ff8c00'; // オレンジ色（加工後の波形と同じ）
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
     }
 
     updateRangeDuration() {
