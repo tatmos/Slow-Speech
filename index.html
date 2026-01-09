@@ -11,7 +11,7 @@
         <header>
             <h1>Slow Speech</h1>
             <p class="subtitle">音声をリサンプリングしてゆっくり、低く再生するツール by <a href="https://github.com/sponsors/tatmos">tatmos</a></p>
-            <div class="app-version">v1.0.0</div>
+            <div class="app-version">v1.1.0</div>
         </header>
 
         <div class="controls-panel">
@@ -102,9 +102,19 @@
                     <div class="track-label">元波形</div>
                     <div class="range-duration" id="range-duration">選択範囲: 0.00秒</div>
                 </div>
-                <div class="waveform-wrapper drop-zone" id="original-drop-zone">
-                    <div class="drop-overlay" id="drop-overlay">波形をアップロード</div>
-                    <canvas id="original-waveform" class="waveform-canvas"></canvas>
+                <div class="waveform-row">
+                    <div class="audio-controls">
+                        <div class="level-meter" id="original-level-meter">
+                            <div class="level-bar" id="original-level-bar"></div>
+                        </div>
+                        <button class="speaker-btn" id="original-speaker-btn" disabled>
+                            <span class="speaker-icon">🔇</span>
+                        </button>
+                    </div>
+                    <div class="waveform-wrapper drop-zone" id="original-drop-zone">
+                        <div class="drop-overlay" id="drop-overlay">波形をアップロード</div>
+                        <canvas id="original-waveform" class="waveform-canvas"></canvas>
+                    </div>
                 </div>
                 <div id="ruler-original" class="time-ruler"></div>
             </div>
@@ -112,9 +122,20 @@
             <div class="processed-waveform-container">
                 <div class="track-header">
                     <div class="track-label">加工後の波形</div>
+                    <button id="show-rate-btn" class="btn btn-small" disabled>再生レートを表示</button>
                 </div>
-                <div class="waveform-wrapper">
-                    <canvas id="processed-waveform" class="waveform-canvas"></canvas>
+                <div class="waveform-row">
+                    <div class="audio-controls">
+                        <div class="level-meter" id="processed-level-meter">
+                            <div class="level-bar" id="processed-level-bar"></div>
+                        </div>
+                        <button class="speaker-btn" id="processed-speaker-btn" disabled>
+                            <span class="speaker-icon">🔊</span>
+                        </button>
+                    </div>
+                    <div class="waveform-wrapper">
+                        <canvas id="processed-waveform" class="waveform-canvas"></canvas>
+                    </div>
                 </div>
                 <div id="ruler-processed" class="time-ruler"></div>
             </div>

@@ -4,9 +4,14 @@ class WaveformRenderer {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         this.ruler = ruler;
+        this.showRateLine = false; // 再生レートライン表示フラグ
     }
 
-    render(audioBuffer, currentPlaybackTime = null, originalDuration = null) {
+    setShowRateLine(show) {
+        this.showRateLine = show;
+    }
+
+    render(audioBuffer, currentPlaybackTime = null, originalDuration = null, rateHistory = null) {
         if (!audioBuffer) return;
 
         const width = this.canvas.width = this.canvas.offsetWidth;
@@ -15,6 +20,11 @@ class WaveformRenderer {
 
         // 加工後のバッファを表示
         this.drawWaveform(audioBuffer, processedDuration, width, height);
+        
+        // 再生レートラインを描画
+        if (this.showRateLine && rateHistory && rateHistory.length > 0) {
+            this.drawRateLine(rateHistory, processedDuration, width, height);
+        }
         
         // 元の長さより長い場合、目的の長さ（元の長さ）の位置に縦ラインを表示
         if (originalDuration !== null && originalDuration > 0 && processedDuration > originalDuration) {
@@ -94,6 +104,86 @@ class WaveformRenderer {
                 backgroundColor: '#e0e0e0'
             }
         );
+    }
+
+    drawRateLine(rateHistory, totalDuration, width, height) {
+        if (!rateHistory || rateHistory.length === 0 || totalDuration <= 0) return;
+
+        const ctx = this.ctx;
+        
+        // 再生レートの範囲を計算
+        let minRate = Infinity;
+        let maxRate = -Infinity;
+        for (let i = 0; i < rateHistory.length; i++) {
+            if (rateHistory[i] && rateHistory[i].rate !== undefined) {
+                minRate = Math.min(minRate, rateHistory[i].rate);
+                maxRate = Math.max(maxRate, rateHistory[i].rate);
+            }
+        }
+        
+        // 有効なデータがない場合は描画しない
+        if (minRate === Infinity || maxRate === -Infinity) return;
+        
+        // 1.0が真ん中になるように調整
+        // 1.0からの最大偏差を計算
+        const maxDeviation = Math.max(Math.abs(maxRate - 1.0), Math.abs(1.0 - minRate));
+        const displayMinRate = Math.max(0, 1.0 - maxDeviation);
+        const displayMaxRate = 1.0 + maxDeviation;
+        
+        // Y座標の計算関数（1.0が真ん中、maxRateが上、minRateが下）
+        const rateToY = (rate) => {
+            if (displayMaxRate === displayMinRate) return height / 2;
+            const normalized = (rate - displayMinRate) / (displayMaxRate - displayMinRate);
+            return height - (normalized * height); // 上下を反転（1.0が真ん中）
+        };
+
+        // 再生レートラインを描画
+        ctx.strokeStyle = '#00aa00'; // 緑色
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        
+        const timeScale = width / totalDuration;
+        let firstPoint = true;
+        
+        // サンプルを間引いて描画（パフォーマンス向上）
+        const step = Math.max(1, Math.floor(rateHistory.length / width));
+        
+        for (let i = 0; i < rateHistory.length; i += step) {
+            if (!rateHistory[i] || rateHistory[i].rate === undefined) continue;
+            
+            const x = rateHistory[i].time * timeScale;
+            const y = rateToY(rateHistory[i].rate);
+            
+            if (x < 0 || x > width) continue;
+            
+            if (firstPoint) {
+                ctx.moveTo(x, y);
+                firstPoint = false;
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        
+        ctx.stroke();
+        
+        // 1.0のラインを描画（真ん中）
+        const centerY = height / 2;
+        ctx.strokeStyle = '#0000ff'; // 青色
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        ctx.lineTo(width, centerY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        // ラベルを描画
+        ctx.fillStyle = '#0000ff';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('1.0', 5, centerY - 5);
+        ctx.fillStyle = '#00aa00';
+        ctx.fillText(`最大: ${maxRate.toFixed(2)}`, 5, 15);
+        ctx.fillText(`最小: ${minRate.toFixed(2)}`, 5, height - 5);
     }
 
     drawTimeRuler(totalDuration, width) {

@@ -31,6 +31,13 @@ class UIController {
         this.silenceCorrectionStrengthValue = document.getElementById('silence-correction-strength-value');
         this.maxSilenceRateSlider = document.getElementById('max-silence-rate');
         this.maxSilenceRateValue = document.getElementById('max-silence-rate-value');
+        this.showRateBtn = document.getElementById('show-rate-btn');
+        this.originalSpeakerBtn = document.getElementById('original-speaker-btn');
+        this.processedSpeakerBtn = document.getElementById('processed-speaker-btn');
+        this.originalLevelBar = document.getElementById('original-level-bar');
+        this.processedLevelBar = document.getElementById('processed-level-bar');
+        this.originalLevelMeter = document.getElementById('original-level-meter');
+        this.processedLevelMeter = document.getElementById('processed-level-meter');
     }
 
     setupEventListeners() {
@@ -98,6 +105,18 @@ class UIController {
                     this.maxCutRatioValue.blur();
                 }
             });
+        }
+
+        if (this.showRateBtn) {
+            this.showRateBtn.addEventListener('click', () => this.toggleRateLine());
+        }
+
+        if (this.originalSpeakerBtn) {
+            this.originalSpeakerBtn.addEventListener('click', () => this.toggleOriginalMute());
+        }
+
+        if (this.processedSpeakerBtn) {
+            this.processedSpeakerBtn.addEventListener('click', () => this.toggleProcessedMute());
         }
 
         if (this.dropZone) {
@@ -245,8 +264,15 @@ class UIController {
             this.playBtn.disabled = true;
             this.stopBtn.disabled = false;
 
-            // 加工後のバッファを再生
-            const started = this.slowSpeech.audioPlayer.playPreview(this.slowSpeech.processedBuffer, 0);
+            // 元波形から利用範囲を抽出（再生用）
+            const useRangeBuffer = this.slowSpeech.audioProcessor.extractRange(
+                this.slowSpeech.originalBuffer,
+                this.slowSpeech.useRangeStart,
+                this.slowSpeech.useRangeEnd
+            );
+
+            // 元波形と加工後のバッファを同時に再生
+            const started = this.slowSpeech.audioPlayer.playPreview(useRangeBuffer, this.slowSpeech.processedBuffer, 0);
             if (!started) {
                 // 既に再生中などで開始できなかった場合はボタン状態を元に戻す
                 this.playBtn.disabled = false;
@@ -699,9 +725,166 @@ class UIController {
         if (this.maxSilenceRateSlider) {
             this.maxSilenceRateSlider.disabled = false;
         }
+        if (this.showRateBtn) {
+            this.showRateBtn.disabled = false;
+        }
+        if (this.originalSpeakerBtn) {
+            this.originalSpeakerBtn.disabled = false;
+        }
+        if (this.processedSpeakerBtn) {
+            this.processedSpeakerBtn.disabled = false;
+        }
+        
+        // スピーカーアイコンの初期状態を設定
+        if (this.originalSpeakerBtn && this.slowSpeech.audioPlayer) {
+            const icon = this.originalSpeakerBtn.querySelector('.speaker-icon');
+            if (icon) {
+                icon.textContent = this.slowSpeech.audioPlayer.originalMuted ? '🔇' : '🔊';
+            }
+            if (this.slowSpeech.audioPlayer.originalMuted) {
+                this.originalSpeakerBtn.classList.add('muted');
+            } else {
+                this.originalSpeakerBtn.classList.remove('muted');
+            }
+        }
+        
+        if (this.processedSpeakerBtn && this.slowSpeech.audioPlayer) {
+            const icon = this.processedSpeakerBtn.querySelector('.speaker-icon');
+            if (icon) {
+                icon.textContent = this.slowSpeech.audioPlayer.processedMuted ? '🔇' : '🔊';
+            }
+            if (this.slowSpeech.audioPlayer.processedMuted) {
+                this.processedSpeakerBtn.classList.add('muted');
+            } else {
+                this.processedSpeakerBtn.classList.remove('muted');
+            }
+        }
+        
         // 無音部分の再生レート倍率コントロールの表示/非表示を更新
         this.updateCutRatioControlsVisibility();
         this.updateCutRatioDisplay();
+    }
+
+    toggleRateLine() {
+        if (!this.slowSpeech.waveformRenderer) return;
+        
+        const currentState = this.slowSpeech.waveformRenderer.showRateLine;
+        const newState = !currentState;
+        this.slowSpeech.waveformRenderer.setShowRateLine(newState);
+        
+        if (this.showRateBtn) {
+            this.showRateBtn.textContent = newState ? '再生レートを非表示' : '再生レートを表示';
+        }
+        
+        // 波形を再描画
+        this.slowSpeech.drawWaveforms();
+    }
+
+    toggleOriginalMute() {
+        if (!this.slowSpeech.audioPlayer) return;
+        
+        const currentMuted = this.slowSpeech.audioPlayer.originalMuted;
+        const newMuted = !currentMuted;
+        this.slowSpeech.audioPlayer.setOriginalMuted(newMuted);
+        
+        if (this.originalSpeakerBtn) {
+            const icon = this.originalSpeakerBtn.querySelector('.speaker-icon');
+            if (icon) {
+                icon.textContent = newMuted ? '🔇' : '🔊';
+            }
+            if (newMuted) {
+                this.originalSpeakerBtn.classList.add('muted');
+            } else {
+                this.originalSpeakerBtn.classList.remove('muted');
+            }
+        }
+        
+        // 再生中の場合、再開する必要がある
+        if (this.slowSpeech.audioPlayer.isPlaying && this.slowSpeech.processedBuffer) {
+            const currentTime = this.slowSpeech.audioPlayer.getCurrentPlaybackTime();
+            const useRangeBuffer = this.slowSpeech.audioProcessor.extractRange(
+                this.slowSpeech.originalBuffer,
+                this.slowSpeech.useRangeStart,
+                this.slowSpeech.useRangeEnd
+            );
+            this.slowSpeech.audioPlayer.stopPreview();
+            this.slowSpeech.audioPlayer.playPreview(useRangeBuffer, this.slowSpeech.processedBuffer, currentTime || 0);
+        }
+    }
+
+    toggleProcessedMute() {
+        if (!this.slowSpeech.audioPlayer) return;
+        
+        const currentMuted = this.slowSpeech.audioPlayer.processedMuted;
+        const newMuted = !currentMuted;
+        this.slowSpeech.audioPlayer.setProcessedMuted(newMuted);
+        
+        if (this.processedSpeakerBtn) {
+            const icon = this.processedSpeakerBtn.querySelector('.speaker-icon');
+            if (icon) {
+                icon.textContent = newMuted ? '🔇' : '🔊';
+            }
+            if (newMuted) {
+                this.processedSpeakerBtn.classList.add('muted');
+            } else {
+                this.processedSpeakerBtn.classList.remove('muted');
+            }
+        }
+        
+        // 再生中の場合、再開する必要がある
+        if (this.slowSpeech.audioPlayer.isPlaying && this.slowSpeech.processedBuffer) {
+            const currentTime = this.slowSpeech.audioPlayer.getCurrentPlaybackTime();
+            const useRangeBuffer = this.slowSpeech.audioProcessor.extractRange(
+                this.slowSpeech.originalBuffer,
+                this.slowSpeech.useRangeStart,
+                this.slowSpeech.useRangeEnd
+            );
+            this.slowSpeech.audioPlayer.stopPreview();
+            this.slowSpeech.audioPlayer.playPreview(useRangeBuffer, this.slowSpeech.processedBuffer, currentTime || 0);
+        }
+    }
+
+    updateLevelMeters() {
+        if (!this.slowSpeech.audioPlayer || !this.slowSpeech.audioPlayer.isPlaying) {
+            // 再生していない場合はレベルメータをリセット
+            if (this.originalLevelBar) {
+                this.originalLevelBar.style.height = '0%';
+            }
+            if (this.processedLevelBar) {
+                this.processedLevelBar.style.height = '0%';
+            }
+            return;
+        }
+
+        // 元波形のレベルメータを更新
+        const originalLevels = this.slowSpeech.audioPlayer.getOriginalLevels();
+        if (originalLevels && this.originalLevelBar) {
+            // 平均レベルを計算
+            let sum = 0;
+            for (let i = 0; i < originalLevels.length; i++) {
+                sum += originalLevels[i];
+            }
+            const average = sum / originalLevels.length;
+            const levelPercent = (average / 255) * 100;
+            this.originalLevelBar.style.height = Math.min(100, levelPercent) + '%';
+        } else if (this.originalLevelBar) {
+            this.originalLevelBar.style.height = '0%';
+        }
+
+        // 加工後の波形のレベルメータを更新
+        const processedLevels = this.slowSpeech.audioPlayer.getProcessedLevels();
+        if (processedLevels && this.processedLevelBar) {
+            // 平均レベルを計算
+            let sum = 0;
+            for (let i = 0; i < processedLevels.length; i++) {
+                sum += processedLevels[i];
+            }
+            const average = sum / processedLevels.length;
+            const levelPercent = (average / 255) * 100;
+            this.processedLevelBar.style.height = Math.min(100, levelPercent) + '%';
+        } else if (this.processedLevelBar) {
+            this.processedLevelBar.style.height = '0%';
+        }
     }
 
     showStatus(message, type = 'info') {

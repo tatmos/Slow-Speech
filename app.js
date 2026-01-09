@@ -15,6 +15,7 @@ class SlowSpeech {
         this.resampleAlgorithm = 'simple'; // リサンプリングアルゴリズム（初期値：シンプルにリサンプル）
         this.currentAlgorithm = null; // 現在のアルゴリズムインスタンス
         this.originalDuration = 0; // 元の利用範囲の長さ（秒）
+        this.rateHistory = null; // 再生レート履歴
         
         this.initializeElements();
         this.uiController = new UIController(this);
@@ -65,6 +66,13 @@ class SlowSpeech {
         // リサンプリング処理
         this.processedBuffer = await this.currentAlgorithm.process(useRangeBuffer, this.playbackRate);
         
+        // 再生レート履歴を保存
+        if (this.currentAlgorithm && typeof this.currentAlgorithm.getRateHistory === 'function') {
+            this.rateHistory = this.currentAlgorithm.getRateHistory();
+        } else {
+            this.rateHistory = null;
+        }
+        
         // デバッグ用：リサンプリング後のバッファの長さを確認
         if (this.processedBuffer) {
             console.log('元の利用範囲の長さ:', useRangeBuffer.duration, '秒');
@@ -77,8 +85,14 @@ class SlowSpeech {
         if (wasPlaying && this.audioPlayer && this.processedBuffer) {
             let seekTime = currentPlaybackTime !== null ? currentPlaybackTime : 0;
             seekTime = Math.max(0, Math.min(this.processedBuffer.duration, seekTime));
+            // 元波形から利用範囲を抽出（再生用）
+            const useRangeBuffer = this.audioProcessor.extractRange(
+                this.originalBuffer,
+                this.useRangeStart,
+                this.useRangeEnd
+            );
             this.audioPlayer.stopPreview();
-            this.audioPlayer.playPreview(this.processedBuffer, seekTime);
+            this.audioPlayer.playPreview(useRangeBuffer, this.processedBuffer, seekTime);
         }
     }
 
@@ -94,8 +108,14 @@ class SlowSpeech {
 
         // 再生中のみシーク
         if (this.audioPlayer.isPlaying) {
+            // 元波形から利用範囲を抽出（再生用）
+            const useRangeBuffer = this.audioProcessor.extractRange(
+                this.originalBuffer,
+                this.useRangeStart,
+                this.useRangeEnd
+            );
             this.audioPlayer.stopPreview();
-            this.audioPlayer.playPreview(this.processedBuffer, targetTime);
+            this.audioPlayer.playPreview(useRangeBuffer, this.processedBuffer, targetTime);
         }
     }
     
@@ -103,16 +123,24 @@ class SlowSpeech {
         if (!this.processedBuffer || !this.waveformRenderer) return;
         
         const currentTime = this.audioPlayer ? this.audioPlayer.getCurrentPlaybackTime() : null;
-        this.waveformRenderer.render(this.processedBuffer, currentTime, this.originalDuration);
+        this.waveformRenderer.render(this.processedBuffer, currentTime, this.originalDuration, this.rateHistory);
     }
 
     startPlaybackAnimation() {
         const animate = () => {
             if (this.audioPlayer && this.audioPlayer.isPlaying) {
                 this.drawWaveforms();
+                // レベルメータを更新
+                if (this.uiController) {
+                    this.uiController.updateLevelMeters();
+                }
                 this.animationFrameId = requestAnimationFrame(animate);
             } else {
                 this.animationFrameId = null;
+                // 再生が停止したらレベルメータをリセット
+                if (this.uiController) {
+                    this.uiController.updateLevelMeters();
+                }
             }
         };
         if (this.animationFrameId === null) {
