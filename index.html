@@ -11,7 +11,7 @@
         <header>
             <h1>Slow Speech</h1>
             <p class="subtitle">音声をリサンプリングしてゆっくり、低く再生するツール by <a href="https://github.com/sponsors/tatmos">tatmos</a></p>
-            <div class="app-version">v1.2.0</div>
+            <div class="app-version">v1.3.0</div>
         </header>
 
         <div class="controls-panel">
@@ -37,6 +37,7 @@
                 <select id="resample-algorithm" class="algorithm-select" disabled>
                     <option value="simple">シンプルにリサンプル</option>
                     <option value="silence-cut">音の長さを保つように無音をカット</option>
+                    <option value="volume-threshold">音量スレッショルドでレート調整</option>
                 </select>
             </div>
             <div id="cut-ratio-controls" class="cut-ratio-controls hidden">
@@ -79,6 +80,46 @@
                             <div id="correction-progress-bar" class="progress-bar"></div>
                         </div>
                         <div id="correction-progress-text" class="progress-text">補正中...</div>
+                    </div>
+                </div>
+            </div>
+            <div id="volume-threshold-controls" class="cut-ratio-controls hidden">
+                <div class="cut-ratio-info">
+                    <div class="cut-ratio-header">
+                        <label>音量スレッショルド設定:</label>
+                        <div class="slider-container-small">
+                            <input type="range" id="volume-threshold" class="slider" min="0.0001" max="0.1" step="0.0001" value="0.01" disabled>
+                            <div class="slider-labels-small">
+                                <span>0.0001</span>
+                                <span id="volume-threshold-value">0.01</span>
+                                <span>0.1</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="cut-ratio-header">
+                        <label>再生レート倍率範囲:</label>
+                        <div class="cut-ratio-values">
+                            <span>最小: <input type="number" id="volume-min-rate-value" class="cut-ratio-input" min="0.001" max="256.0" step="0.001" value="0.001" disabled></span>
+                            <span>最大: <input type="number" id="volume-max-rate-value" class="cut-ratio-input" min="0.001" max="256.0" step="0.001" value="256.0" disabled></span>
+                        </div>
+                    </div>
+                    <div class="cut-ratio-header">
+                        <label>補正の強さ:</label>
+                        <div class="slider-container-small">
+                            <input type="range" id="volume-correction-strength" class="slider" min="0.0" max="1.0" step="0.01" value="0.50" disabled>
+                            <div class="slider-labels-small">
+                                <span>弱い (0.0)</span>
+                                <span id="volume-correction-strength-value">0.50</span>
+                                <span>強い (1.0)</span>
+                            </div>
+                        </div>
+                    </div>
+                    <button id="adjust-volume-threshold-btn" class="btn btn-small" disabled>目標の長さに補正</button>
+                    <div id="volume-correction-progress-container" class="correction-progress-container hidden">
+                        <div class="progress-bar-wrapper">
+                            <div id="volume-correction-progress-bar" class="progress-bar"></div>
+                        </div>
+                        <div id="volume-correction-progress-text" class="progress-text">補正中...</div>
                     </div>
                 </div>
             </div>

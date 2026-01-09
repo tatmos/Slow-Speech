@@ -40,6 +40,18 @@ class UIController {
         this.correctionProgressContainer = document.getElementById('correction-progress-container');
         this.correctionProgressBar = document.getElementById('correction-progress-bar');
         this.correctionProgressText = document.getElementById('correction-progress-text');
+        // 音量スレッショルドアルゴリズム用のコントロール
+        this.volumeThresholdControls = document.getElementById('volume-threshold-controls');
+        this.volumeThresholdSlider = document.getElementById('volume-threshold');
+        this.volumeThresholdValue = document.getElementById('volume-threshold-value');
+        this.volumeMinRateValue = document.getElementById('volume-min-rate-value');
+        this.volumeMaxRateValue = document.getElementById('volume-max-rate-value');
+        this.volumeCorrectionStrengthSlider = document.getElementById('volume-correction-strength');
+        this.volumeCorrectionStrengthValue = document.getElementById('volume-correction-strength-value');
+        this.adjustVolumeThresholdBtn = document.getElementById('adjust-volume-threshold-btn');
+        this.volumeCorrectionProgressContainer = document.getElementById('volume-correction-progress-container');
+        this.volumeCorrectionProgressBar = document.getElementById('volume-correction-progress-bar');
+        this.volumeCorrectionProgressText = document.getElementById('volume-correction-progress-text');
     }
 
     setupEventListeners() {
@@ -119,6 +131,23 @@ class UIController {
 
         if (this.processedSpeakerBtn) {
             this.processedSpeakerBtn.addEventListener('click', () => this.toggleProcessedMute());
+        }
+
+        // 音量スレッショルドアルゴリズム用のイベントリスナー
+        if (this.volumeThresholdSlider) {
+            this.volumeThresholdSlider.addEventListener('input', (e) => this.handleVolumeThresholdChange(e));
+        }
+        if (this.volumeMinRateValue) {
+            this.volumeMinRateValue.addEventListener('change', (e) => this.handleVolumeMinRateChange(e));
+        }
+        if (this.volumeMaxRateValue) {
+            this.volumeMaxRateValue.addEventListener('change', (e) => this.handleVolumeMaxRateChange(e));
+        }
+        if (this.volumeCorrectionStrengthSlider) {
+            this.volumeCorrectionStrengthSlider.addEventListener('input', (e) => this.handleVolumeCorrectionStrengthChange(e));
+        }
+        if (this.adjustVolumeThresholdBtn) {
+            this.adjustVolumeThresholdBtn.addEventListener('click', () => this.adjustVolumeThresholdToTarget());
         }
 
         if (this.dropZone) {
@@ -419,6 +448,7 @@ class UIController {
         await this.slowSpeech.updateBuffers();
         this.slowSpeech.drawWaveforms();
         this.updateCutRatioDisplay();
+        this.updateVolumeThresholdDisplay();
     }
 
     updateCutRatioControlsVisibility() {
@@ -434,6 +464,15 @@ class UIController {
                 }
             } else {
                 this.cutRatioControls.classList.add('hidden');
+            }
+        }
+        
+        // 音量スレッショルドアルゴリズム用のコントロール
+        if (this.volumeThresholdControls) {
+            if (this.slowSpeech.resampleAlgorithm === 'volume-threshold') {
+                this.volumeThresholdControls.classList.remove('hidden');
+            } else {
+                this.volumeThresholdControls.classList.add('hidden');
             }
         }
     }
@@ -917,6 +956,23 @@ class UIController {
             this.processedSpeakerBtn.disabled = false;
         }
         
+        // 音量スレッショルドアルゴリズム用のコントロール
+        if (this.volumeThresholdSlider) {
+            this.volumeThresholdSlider.disabled = false;
+        }
+        if (this.volumeMinRateValue) {
+            this.volumeMinRateValue.disabled = false;
+        }
+        if (this.volumeMaxRateValue) {
+            this.volumeMaxRateValue.disabled = false;
+        }
+        if (this.volumeCorrectionStrengthSlider) {
+            this.volumeCorrectionStrengthSlider.disabled = false;
+        }
+        if (this.adjustVolumeThresholdBtn) {
+            this.adjustVolumeThresholdBtn.disabled = false;
+        }
+        
         // スピーカーアイコンの初期状態を設定
         if (this.originalSpeakerBtn && this.slowSpeech.audioPlayer) {
             const icon = this.originalSpeakerBtn.querySelector('.speaker-icon');
@@ -1039,5 +1095,330 @@ class UIController {
     showStatus(message, type = 'info') {
         this.status.textContent = message;
         this.status.className = 'status ' + type;
+    }
+
+    // 音量スレッショルドアルゴリズム用のハンドラー
+    handleVolumeThresholdChange(event) {
+        const threshold = parseFloat(event.target.value);
+        if (this.slowSpeech.currentAlgorithm && 
+            this.slowSpeech.currentAlgorithm instanceof VolumeThresholdResampleAlgorithm) {
+            this.slowSpeech.currentAlgorithm.setVolumeThreshold(threshold);
+            if (this.volumeThresholdValue) {
+                this.volumeThresholdValue.textContent = threshold.toFixed(4);
+            }
+            this.slowSpeech.updateBuffers().then(() => {
+                this.slowSpeech.drawWaveforms();
+            });
+        }
+    }
+
+    handleVolumeMinRateChange(event) {
+        let value = parseFloat(event.target.value);
+        if (isNaN(value)) {
+            value = 0.001;
+        }
+        value = Math.max(0.001, Math.min(256.0, value));
+        
+        if (this.slowSpeech.currentAlgorithm && 
+            this.slowSpeech.currentAlgorithm instanceof VolumeThresholdResampleAlgorithm) {
+            const maxRate = this.slowSpeech.currentAlgorithm.maxRate;
+            if (value > maxRate) {
+                value = maxRate;
+            }
+            this.slowSpeech.currentAlgorithm.setRateRange(value, maxRate);
+            this.slowSpeech.updateBuffers().then(() => {
+                this.slowSpeech.drawWaveforms();
+            });
+        }
+    }
+
+    handleVolumeMaxRateChange(event) {
+        let value = parseFloat(event.target.value);
+        if (isNaN(value)) {
+            value = 256.0;
+        }
+        value = Math.max(0.001, Math.min(256.0, value));
+        
+        if (this.slowSpeech.currentAlgorithm && 
+            this.slowSpeech.currentAlgorithm instanceof VolumeThresholdResampleAlgorithm) {
+            const minRate = this.slowSpeech.currentAlgorithm.minRate;
+            if (value < minRate) {
+                value = minRate;
+            }
+            this.slowSpeech.currentAlgorithm.setRateRange(minRate, value);
+            this.slowSpeech.updateBuffers().then(() => {
+                this.slowSpeech.drawWaveforms();
+            });
+        }
+    }
+
+    handleVolumeCorrectionStrengthChange(event) {
+        const strength = parseFloat(event.target.value);
+        if (this.slowSpeech.currentAlgorithm && 
+            this.slowSpeech.currentAlgorithm instanceof VolumeThresholdResampleAlgorithm) {
+            this.slowSpeech.currentAlgorithm.setCorrectionStrength(strength);
+            if (this.volumeCorrectionStrengthValue) {
+                this.volumeCorrectionStrengthValue.textContent = strength.toFixed(2);
+            }
+            this.slowSpeech.updateBuffers().then(() => {
+                this.slowSpeech.drawWaveforms();
+            });
+        }
+    }
+
+    // 音量スレッショルドアルゴリズム用の補正ロジック
+    async adjustVolumeThresholdToTarget() {
+        if (!this.slowSpeech.currentAlgorithm || 
+            !(this.slowSpeech.currentAlgorithm instanceof VolumeThresholdResampleAlgorithm)) {
+            return;
+        }
+
+        if (!this.slowSpeech.originalBuffer) {
+            return;
+        }
+
+        const algorithm = this.slowSpeech.currentAlgorithm;
+        const targetDuration = this.slowSpeech.originalDuration;
+        
+        if (targetDuration <= 0) {
+            this.showStatus('元の長さが無効です', 'error');
+            return;
+        }
+
+        // ボタンを無効化
+        if (this.adjustVolumeThresholdBtn) {
+            this.adjustVolumeThresholdBtn.disabled = true;
+        }
+        this.showStatus('補正を開始します...', 'info');
+
+        // プログレスバーを表示
+        if (this.volumeCorrectionProgressContainer) {
+            this.volumeCorrectionProgressContainer.classList.remove('hidden');
+        }
+        this.updateVolumeProgress(0, '補正開始...');
+
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        try {
+            let originalVolumeThreshold = algorithm.volumeThreshold;
+            let originalMinRate = algorithm.minRate;
+            let originalMaxRate = algorithm.maxRate;
+            let originalCorrectionStrength = algorithm.correctionStrength;
+            let newVolumeThreshold = originalVolumeThreshold;
+            let newMinRate = originalMinRate;
+            let newMaxRate = originalMaxRate;
+            let newCorrectionStrength = originalCorrectionStrength;
+            const maxIterations = 20;
+            const tolerance = 0.01;
+
+            // 初回の現在の状態を確認
+            await this.slowSpeech.updateBuffers();
+            let previousDuration = this.slowSpeech.processedBuffer ? this.slowSpeech.processedBuffer.duration : targetDuration;
+            let previousDiff = previousDuration - targetDuration;
+            let wasTooLong = previousDiff > 0;
+            
+            const initialDiff = Math.abs(previousDiff);
+            let bestDiff = initialDiff;
+
+            for (let iteration = 0; iteration < maxIterations; iteration++) {
+                const minProgressPercent = ((iteration + 1) / maxIterations) * 50;
+                this.updateVolumeProgress(minProgressPercent, `補正中... (${iteration + 1}/${maxIterations}) 設定を更新中...`);
+
+                algorithm.setVolumeThreshold(newVolumeThreshold);
+                algorithm.setRateRange(newMinRate, newMaxRate);
+                algorithm.setCorrectionStrength(newCorrectionStrength);
+                this.updateVolumeThresholdDisplay();
+
+                await new Promise(resolve => setTimeout(resolve, 10));
+
+                this.updateVolumeProgress(minProgressPercent + 5, `補正中... (${iteration + 1}/${maxIterations}) バッファを再生成中...`);
+
+                await this.slowSpeech.updateBuffers();
+                await new Promise(resolve => setTimeout(resolve, 10));
+                this.slowSpeech.drawWaveforms();
+
+                if (!this.slowSpeech.processedBuffer) {
+                    break;
+                }
+
+                const processedDuration = this.slowSpeech.processedBuffer.duration;
+                const durationDiff = processedDuration - targetDuration;
+                const currentDiff = Math.abs(durationDiff);
+                const diffRatio = Math.abs(durationDiff / targetDuration);
+
+                let progressPercent = minProgressPercent;
+                if (initialDiff > tolerance) {
+                    const improvement = Math.max(0, Math.min(1, (initialDiff - currentDiff) / initialDiff));
+                    const improvementProgress = improvement * (95 - minProgressPercent);
+                    progressPercent = minProgressPercent + improvementProgress;
+                } else {
+                    progressPercent = ((iteration + 1) / maxIterations) * 95;
+                }
+
+                if (currentDiff < bestDiff) {
+                    bestDiff = currentDiff;
+                }
+
+                this.updateVolumeProgress(progressPercent, `補正中... (${iteration + 1}/${maxIterations}) 残り: ${currentDiff.toFixed(2)}秒`);
+
+                if (currentDiff < tolerance) {
+                    this.updateVolumeProgress(100, '補正完了！');
+                    this.showStatus('目標の長さに補正しました', 'success');
+                    this.slowSpeech.drawWaveforms();
+                    setTimeout(() => {
+                        if (this.volumeCorrectionProgressContainer) {
+                            this.volumeCorrectionProgressContainer.classList.add('hidden');
+                        }
+                    }, 1000);
+                    if (this.adjustVolumeThresholdBtn) {
+                        this.adjustVolumeThresholdBtn.disabled = false;
+                    }
+                    return;
+                }
+
+                const isTooLong = durationDiff > 0;
+                const isOvershot = (wasTooLong && !isTooLong) || (!wasTooLong && isTooLong);
+
+                const previousVolumeThreshold = newVolumeThreshold;
+                const previousMinRate = newMinRate;
+                const previousMaxRate = newMaxRate;
+                const previousCorrectionStrength = newCorrectionStrength;
+
+                // まずレート範囲で調整を試みる
+                if (isTooLong) {
+                    // 長すぎる場合：maxRateを上げる
+                    if (isOvershot && iteration > 0) {
+                        newMaxRate = Math.min(256.0, (newMaxRate + previousMaxRate) / 2);
+                        newCorrectionStrength = (newCorrectionStrength + previousCorrectionStrength) / 2;
+                    } else {
+                        const aggressiveFactor = iteration === 0 ? 10.0 : (iteration < 3 ? 5.0 : 2.0);
+                        const increaseAmount = Math.min(diffRatio * aggressiveFactor * 50.0, 200.0);
+                        newMaxRate = Math.min(256.0, newMaxRate + increaseAmount);
+                        if (newMinRate < 1.0) {
+                            newMinRate = 1.0;
+                        }
+                        const strengthIncrease = Math.min(diffRatio * aggressiveFactor * 2.0, 2.0);
+                        newCorrectionStrength = newCorrectionStrength + strengthIncrease;
+                    }
+                } else {
+                    // 短すぎる場合：minRateを下げる
+                    if (isOvershot && iteration > 0) {
+                        newMinRate = Math.max(0.001, (newMinRate + previousMinRate) / 2);
+                        newCorrectionStrength = (newCorrectionStrength + previousCorrectionStrength) / 2;
+                    } else {
+                        const aggressiveFactor = iteration === 0 ? 10.0 : (iteration < 3 ? 5.0 : 2.0);
+                        if (newMinRate > 0.001) {
+                            const minDecreaseAmount = Math.min(diffRatio * aggressiveFactor * 0.5, newMinRate - 0.001);
+                            newMinRate = Math.max(0.001, newMinRate - minDecreaseAmount);
+                        }
+                        const strengthIncrease = Math.min(diffRatio * aggressiveFactor * 0.5, 1.0);
+                        newCorrectionStrength = Math.min(2.0, newCorrectionStrength + strengthIncrease);
+                    }
+                }
+
+                // レート範囲の調整だけでは不十分な場合、音量スレッショルドも調整
+                if (iteration > 5 && currentDiff > tolerance * 2) {
+                    if (isTooLong) {
+                        // 長すぎる場合：音量スレッショルドを下げる（より多くの部分を低音量として扱う）
+                        if (isOvershot && iteration > 0) {
+                            newVolumeThreshold = (newVolumeThreshold + previousVolumeThreshold) / 2;
+                        } else {
+                            const thresholdDecrease = Math.min(diffRatio * 0.1, newVolumeThreshold - 0.0001);
+                            newVolumeThreshold = Math.max(0.0001, newVolumeThreshold - thresholdDecrease);
+                        }
+                    } else {
+                        // 短すぎる場合：音量スレッショルドを上げる（より少ない部分を低音量として扱う）
+                        if (isOvershot && iteration > 0) {
+                            newVolumeThreshold = (newVolumeThreshold + previousVolumeThreshold) / 2;
+                        } else {
+                            const thresholdIncrease = Math.min(diffRatio * 0.1, 0.1 - newVolumeThreshold);
+                            newVolumeThreshold = Math.min(0.1, newVolumeThreshold + thresholdIncrease);
+                        }
+                    }
+                }
+
+                // 範囲チェック
+                if (newMinRate < 0.001) newMinRate = 0.001;
+                if (newMaxRate > 256.0) newMaxRate = 256.0;
+                if (newMinRate >= newMaxRate) {
+                    newMinRate = Math.max(0.001, newMaxRate - 0.1);
+                }
+                if (newVolumeThreshold < 0.0001) newVolumeThreshold = 0.0001;
+                if (newVolumeThreshold > 0.1) newVolumeThreshold = 0.1;
+
+                previousDuration = processedDuration;
+                previousDiff = durationDiff;
+                wasTooLong = isTooLong;
+                newCorrectionStrength = Math.max(0.0, newCorrectionStrength);
+            }
+
+            // 最終結果を確認
+            algorithm.setVolumeThreshold(newVolumeThreshold);
+            algorithm.setRateRange(newMinRate, newMaxRate);
+            algorithm.setCorrectionStrength(newCorrectionStrength);
+            this.updateVolumeThresholdDisplay();
+            await this.slowSpeech.updateBuffers();
+            this.slowSpeech.drawWaveforms();
+
+            this.updateVolumeProgress(100, '補正完了');
+            
+            if (this.slowSpeech.processedBuffer) {
+                const finalDuration = this.slowSpeech.processedBuffer.duration;
+                const finalDiff = Math.abs(finalDuration - targetDuration);
+                if (finalDiff < tolerance) {
+                    this.showStatus('目標の長さに補正しました', 'success');
+                } else {
+                    this.showStatus(`補正しました（残差: ${finalDiff.toFixed(2)}秒）`, 'info');
+                }
+            }
+
+            setTimeout(() => {
+                if (this.volumeCorrectionProgressContainer) {
+                    this.volumeCorrectionProgressContainer.classList.add('hidden');
+                }
+            }, 1000);
+
+        } catch (error) {
+            console.error('補正エラー:', error);
+            this.showStatus('補正中にエラーが発生しました: ' + error.message, 'error');
+        } finally {
+            if (this.adjustVolumeThresholdBtn) {
+                this.adjustVolumeThresholdBtn.disabled = false;
+            }
+        }
+    }
+
+    updateVolumeThresholdDisplay() {
+        if (this.slowSpeech.currentAlgorithm && 
+            this.slowSpeech.currentAlgorithm instanceof VolumeThresholdResampleAlgorithm) {
+            const algorithm = this.slowSpeech.currentAlgorithm;
+            if (this.volumeThresholdValue) {
+                this.volumeThresholdValue.textContent = algorithm.volumeThreshold.toFixed(4);
+            }
+            if (this.volumeThresholdSlider) {
+                this.volumeThresholdSlider.value = algorithm.volumeThreshold;
+            }
+            if (this.volumeMinRateValue) {
+                this.volumeMinRateValue.value = algorithm.minRate.toFixed(3);
+            }
+            if (this.volumeMaxRateValue) {
+                this.volumeMaxRateValue.value = algorithm.maxRate.toFixed(3);
+            }
+            if (this.volumeCorrectionStrengthValue) {
+                this.volumeCorrectionStrengthValue.textContent = algorithm.correctionStrength.toFixed(2);
+            }
+            if (this.volumeCorrectionStrengthSlider) {
+                this.volumeCorrectionStrengthSlider.value = algorithm.correctionStrength;
+            }
+        }
+    }
+
+    updateVolumeProgress(percent, text) {
+        if (this.volumeCorrectionProgressBar) {
+            this.volumeCorrectionProgressBar.style.width = percent + '%';
+        }
+        if (this.volumeCorrectionProgressText) {
+            this.volumeCorrectionProgressText.textContent = text;
+        }
     }
 }

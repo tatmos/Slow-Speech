@@ -507,6 +507,233 @@ class SilenceCutResampleAlgorithm extends ResampleAlgorithm {
     }
 }
 
+// 音量スレッショルドに基づいてレートを操作して長さを合わせる
+class VolumeThresholdResampleAlgorithm extends ResampleAlgorithm {
+    constructor(audioContext) {
+        super(audioContext);
+        this.volumeThreshold = 0.01; // 音量スレッショルド（RMS）
+        this.windowSize = 1024; // 音量検出のウィンドウサイズ（サンプル数）
+        this.minRate = 0.001; // 最小再生レート倍率
+        this.maxRate = 256.0; // 最大再生レート倍率
+        this.correctionStrength = 0.5; // 補正の強さ（0.0〜1.0）
+        this.rateHistory = null; // 再生レート履歴
+    }
+
+    getName() {
+        return '音量スレッショルドでレート調整';
+    }
+
+    // 音量スレッショルドを設定
+    setVolumeThreshold(threshold) {
+        this.volumeThreshold = Math.max(0.0001, Math.min(1.0, threshold));
+    }
+
+    // 再生レート倍率の範囲を設定
+    setRateRange(minRate, maxRate) {
+        this.minRate = Math.max(0.001, minRate);
+        this.maxRate = Math.max(0.001, Math.min(256.0, maxRate));
+        if (this.minRate > this.maxRate) {
+            this.minRate = this.maxRate;
+        }
+    }
+
+    // 補正の強さを設定
+    setCorrectionStrength(strength) {
+        this.correctionStrength = Math.max(0.0, strength);
+    }
+
+    // 音量を計算（RMS）
+    calculateVolume(channelData, startIndex, endIndex) {
+        let sumSquared = 0;
+        let count = 0;
+        
+        for (let i = startIndex; i < endIndex && i < channelData.length; i++) {
+            sumSquared += channelData[i] * channelData[i];
+            count++;
+        }
+        
+        if (count === 0) return 0;
+        
+        return Math.sqrt(sumSquared / count);
+    }
+
+    // リサンプリング処理
+    async process(audioBuffer, playbackRate) {
+        if (!audioBuffer || playbackRate <= 0) {
+            this.rateHistory = null;
+            return audioBuffer;
+        }
+
+        // まずシンプルにリサンプル
+        const simpleAlgorithm = new SimpleResampleAlgorithm(this.audioContext);
+        const resampledBuffer = await simpleAlgorithm.process(audioBuffer, playbackRate);
+
+        const originalLength = audioBuffer.length;
+        const targetLength = originalLength; // 目標の長さ（元の長さ）
+        const resampledLength = resampledBuffer.length;
+        const numChannels = resampledBuffer.numberOfChannels;
+        const sampleRate = resampledBuffer.sampleRate;
+
+        // リサンプリング後の長さと目標の長さの差を計算
+        const lengthDiff = resampledLength - targetLength;
+        
+        if (Math.abs(lengthDiff) < 1) {
+            // 差が小さい場合はそのまま返す
+            this.rateHistory = simpleAlgorithm.getRateHistory();
+            return resampledBuffer;
+        }
+
+        // 出力データ配列
+        const outputDataArrays = [];
+        let maxOutputLength = 0;
+
+        // 再生レート履歴を初期化
+        this.rateHistory = [];
+
+        for (let channel = 0; channel < numChannels; channel++) {
+            const inputData = resampledBuffer.getChannelData(channel);
+            const outputData = [];
+            
+            let outputIndex = 0;
+            let inputIndex = 0;
+            let currentRate = playbackRate;
+
+            // 先頭から順に処理
+            while (inputIndex < resampledLength) {
+                const windowEnd = Math.min(inputIndex + this.windowSize, resampledLength);
+                const volume = this.calculateVolume(inputData, inputIndex, windowEnd);
+                const isLowVolume = volume < this.volumeThreshold;
+
+                if (isLowVolume) {
+                    // 低音量部分：レートを調整して長さを合わせる
+                    let segmentStartIndex = inputIndex;
+                    let segmentEndIndex = windowEnd;
+                    
+                    // 低音量部分の終わりを検出
+                    while (segmentEndIndex < resampledLength) {
+                        const checkEnd = Math.min(segmentEndIndex + this.windowSize, resampledLength);
+                        const checkVolume = this.calculateVolume(inputData, segmentEndIndex, checkEnd);
+                        if (checkVolume >= this.volumeThreshold) {
+                            break;
+                        }
+                        segmentEndIndex = checkEnd;
+                    }
+                    
+                    const segmentLength = segmentEndIndex - segmentStartIndex;
+                    const segmentSize = Math.max(128, Math.floor(this.windowSize / 4));
+                    let segmentProcessedSamples = 0;
+                    
+                    // 長さの差に基づいて補正の強さを決定
+                    const relativeDiff = targetLength > 0 ? Math.abs(lengthDiff) / targetLength : 0;
+                    const correctionFactor = 0.3 + (relativeDiff * 0.7) * (1.0 + this.correctionStrength);
+                    
+                    while (segmentProcessedSamples < segmentLength) {
+                        const currentSegmentSize = Math.min(segmentSize, segmentLength - segmentProcessedSamples);
+                        const segmentEndInSegment = segmentProcessedSamples + currentSegmentSize;
+                        
+                        // セグメント内での経過時間の割合
+                        const progressInSegment = segmentProcessedSamples / segmentLength;
+                        const progressRatio = Math.pow(progressInSegment, 1.5);
+                        const adjustedProgressRatio = Math.min(progressRatio * correctionFactor, 1.0);
+                        
+                        // 長さの差に応じてレートを調整
+                        let segmentRate;
+                        if (lengthDiff > 0) {
+                            // 長すぎる場合：レートを上げる
+                            segmentRate = this.minRate + (adjustedProgressRatio * (this.maxRate - this.minRate));
+                        } else {
+                            // 短すぎる場合：レートを下げる
+                            segmentRate = this.maxRate - (adjustedProgressRatio * (this.maxRate - this.minRate));
+                        }
+                        
+                        currentRate = playbackRate * segmentRate;
+                        
+                        // セグメントをリサンプリング
+                        const segmentStartInInput = segmentStartIndex + segmentProcessedSamples;
+                        const segmentEndInInput = segmentStartIndex + segmentEndInSegment;
+                        const segmentOutputLength = Math.floor(currentSegmentSize / segmentRate);
+                        
+                        for (let i = 0; i < segmentOutputLength; i++) {
+                            const sourcePosition = segmentStartInInput + (i / segmentOutputLength) * currentSegmentSize;
+                            const sourceIndex = Math.floor(sourcePosition);
+                            const fraction = sourcePosition - sourceIndex;
+                            
+                            if (sourceIndex + 1 < segmentEndInInput && sourceIndex + 1 < inputData.length) {
+                                outputData[outputIndex] = inputData[sourceIndex] * (1 - fraction) + 
+                                                           inputData[sourceIndex + 1] * fraction;
+                            } else if (sourceIndex < segmentEndInInput && sourceIndex < inputData.length) {
+                                outputData[outputIndex] = inputData[sourceIndex];
+                            } else {
+                                outputData[outputIndex] = 0;
+                            }
+                            
+                            // 再生レート履歴を記録（チャンネル0のみ）
+                            if (channel === 0) {
+                                const outputTime = outputIndex / sampleRate;
+                                this.rateHistory[outputIndex] = { time: outputTime, rate: currentRate };
+                            }
+                            
+                            outputIndex++;
+                        }
+                        
+                        segmentProcessedSamples += currentSegmentSize;
+                    }
+                    
+                    inputIndex = segmentEndIndex;
+                } else {
+                    // 高音量部分：そのままコピー
+                    currentRate = playbackRate;
+                    
+                    // 再生レート履歴を記録（チャンネル0のみ）
+                    if (channel === 0) {
+                        const outputTime = outputIndex / sampleRate;
+                        this.rateHistory[outputIndex] = { time: outputTime, rate: currentRate };
+                    }
+                    
+                    outputData[outputIndex] = inputData[inputIndex];
+                    outputIndex++;
+                    inputIndex++;
+                }
+            }
+
+            outputDataArrays.push(outputData);
+            maxOutputLength = Math.max(maxOutputLength, outputData.length);
+        }
+
+        // 出力バッファを作成
+        const outputBuffer = this.audioContext.createBuffer(
+            numChannels,
+            maxOutputLength,
+            sampleRate
+        );
+
+        // 各チャンネルのデータを出力バッファにコピー
+        for (let channel = 0; channel < numChannels; channel++) {
+            const outputData = outputBuffer.getChannelData(channel);
+            const sourceData = outputDataArrays[channel];
+            
+            for (let i = 0; i < sourceData.length; i++) {
+                outputData[i] = sourceData[i];
+            }
+            for (let i = sourceData.length; i < maxOutputLength; i++) {
+                outputData[i] = 0;
+            }
+        }
+
+        // 再生レート履歴を実際の出力長さに合わせて調整
+        if (this.rateHistory.length > maxOutputLength) {
+            this.rateHistory = this.rateHistory.slice(0, maxOutputLength);
+        }
+        
+        return outputBuffer;
+    }
+
+    // 再生レート履歴を取得
+    getRateHistory() {
+        return this.rateHistory;
+    }
+}
+
 // アルゴリズムファクトリー
 class ResampleAlgorithmFactory {
     static create(algorithmName, audioContext) {
@@ -515,6 +742,8 @@ class ResampleAlgorithmFactory {
                 return new SimpleResampleAlgorithm(audioContext);
             case 'silence-cut':
                 return new SilenceCutResampleAlgorithm(audioContext);
+            case 'volume-threshold':
+                return new VolumeThresholdResampleAlgorithm(audioContext);
             default:
                 return new SimpleResampleAlgorithm(audioContext);
         }
@@ -523,7 +752,8 @@ class ResampleAlgorithmFactory {
     static getAvailableAlgorithms() {
         return [
             { value: 'simple', name: 'シンプルにリサンプル' },
-            { value: 'silence-cut', name: '音の長さを保つように無音をカット' }
+            { value: 'silence-cut', name: '音の長さを保つように無音をカット' },
+            { value: 'volume-threshold', name: '音量スレッショルドでレート調整' }
         ];
     }
 }
