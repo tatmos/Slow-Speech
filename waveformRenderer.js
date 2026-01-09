@@ -3,7 +3,7 @@ class WaveformRenderer {
     constructor(canvas, ruler) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
-        this.ruler = ruler;
+        this.timeRuler = new TimeRuler(ruler);
         this.showRateLine = false; // 再生レートライン表示フラグ
     }
 
@@ -37,7 +37,7 @@ class WaveformRenderer {
         }
         
         // タイムルーラーを描画
-        this.drawTimeRuler(processedDuration, width);
+        this.timeRuler.draw(processedDuration, width);
     }
 
     drawPlaybackPosition(currentTime, totalDuration, width, height) {
@@ -186,53 +186,4 @@ class WaveformRenderer {
         ctx.fillText(`最小: ${minRate.toFixed(2)}`, 5, height - 5);
     }
 
-    drawTimeRuler(totalDuration, width) {
-        if (totalDuration <= 0) {
-            this.ruler.innerHTML = '';
-            return;
-        }
-
-        // タイムルーラーの目盛りを計算
-        this.ruler.innerHTML = '';
-
-        // 適切な目盛り間隔を計算（5秒、10秒、30秒など）
-        let tickInterval = 1; // デフォルト1秒
-        if (totalDuration > 60) {
-            tickInterval = 10;
-        } else if (totalDuration > 30) {
-            tickInterval = 5;
-        } else if (totalDuration > 10) {
-            tickInterval = 2;
-        }
-
-        const timeScale = width / totalDuration;
-        const numTicks = Math.floor(totalDuration / tickInterval) + 1;
-
-        for (let i = 0; i < numTicks; i++) {
-            const time = i * tickInterval;
-            if (time > totalDuration) break;
-
-            const x = time * timeScale;
-
-            // 目盛り線
-            const tick = document.createElement('div');
-            tick.style.position = 'absolute';
-            tick.style.left = x + 'px';
-            tick.style.top = '0';
-            tick.style.width = '1px';
-            tick.style.height = '100%';
-            tick.style.background = '#adb5bd';
-            this.ruler.appendChild(tick);
-
-            // 時間ラベル
-            const label = document.createElement('div');
-            label.style.position = 'absolute';
-            label.style.left = (x + 2) + 'px';
-            label.style.top = '2px';
-            label.style.fontSize = '11px';
-            label.style.color = '#495057';
-            label.textContent = time.toFixed(1) + 's';
-            this.ruler.appendChild(label);
-        }
-    }
 }

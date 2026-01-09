@@ -685,6 +685,8 @@ header h1 {
     border-top: 1px solid #dee2e6;
     position: relative;
     margin-top: 5px;
+    margin-left: 50px; /* audio-controlsの幅(40px) + gap(10px) */
+    width: calc(100% - 50px); /* 波形と同じ幅にする */
     font-size: 11px;
     color: #495057;
     overflow: hidden;

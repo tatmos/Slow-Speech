@@ -3,7 +3,7 @@ class OriginalWaveformViewer {
     constructor(canvas, ruler) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
-        this.ruler = ruler;
+        this.timeRuler = new TimeRuler(ruler);
         this.audioBuffer = null;
         this.startTime = 0; // 利用範囲の開始位置（秒）
         this.endTime = 0; // 利用範囲の終了位置（秒）
@@ -386,7 +386,7 @@ class OriginalWaveformViewer {
         }
 
         // タイムルーラーを描画
-        this.drawTimeRuler(duration, width);
+        this.timeRuler.draw(duration, width);
     }
 
     drawPlaybackPosition(currentTime, totalDuration, width, height) {
@@ -456,53 +456,10 @@ class OriginalWaveformViewer {
         // ラベル
         ctx.fillStyle = '#ff6b6b';
         ctx.font = '12px sans-serif';
-        ctx.fillText(this.formatTime(this.startTime), startX + 5, 15);
-        ctx.fillText(this.formatTime(this.endTime), endX - 50, 15);
+        ctx.fillText(TimeRuler.formatTime(this.startTime), startX + 5, 15);
+        ctx.fillText(TimeRuler.formatTime(this.endTime), endX - 50, 15);
     }
 
-    drawTimeRuler(duration, width) {
-        this.ruler.innerHTML = '';
-        const timeScale = width / duration;
-        const tickInterval = this.calculateTickInterval(duration, width);
-        
-        for (let time = 0; time <= duration; time += tickInterval) {
-            const x = time * timeScale;
-            const tick = document.createElement('div');
-            tick.className = 'ruler-tick';
-            tick.style.left = x + 'px';
-            tick.textContent = this.formatTime(time);
-            this.ruler.appendChild(tick);
-        }
-    }
-
-    calculateTickInterval(duration, width) {
-        const minTickSpacing = 80; // 最小の目盛り間隔（ピクセル）
-        const idealTicks = width / minTickSpacing;
-        const rawInterval = duration / idealTicks;
-        
-        // 適切な間隔に丸める
-        const magnitude = Math.pow(10, Math.floor(Math.log10(rawInterval)));
-        const normalized = rawInterval / magnitude;
-        
-        let interval;
-        if (normalized < 1.5) {
-            interval = magnitude;
-        } else if (normalized < 3) {
-            interval = 2 * magnitude;
-        } else if (normalized < 7) {
-            interval = 5 * magnitude;
-        } else {
-            interval = 10 * magnitude;
-        }
-        
-        return interval;
-    }
-
-    formatTime(seconds) {
-        const mins = Math.floor(seconds / 60);
-        const secs = (seconds % 60).toFixed(2);
-        return mins > 0 ? `${mins}:${secs.padStart(5, '0')}` : `${secs}s`;
-    }
 
     calculateDCOffset(channelData, startSample, endSample) {
         let sum = 0;

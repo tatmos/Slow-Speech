@@ -112,8 +112,8 @@ class SilenceCutResampleAlgorithm extends ResampleAlgorithm {
 
     // 無音部分の再生レート倍率を設定
     setCutRatios(minSilenceRate, maxSilenceRate) {
-        this.minSilenceRate = Math.max(0.1, minSilenceRate); // 最小0.1倍
-        this.maxSilenceRate = Math.max(0.1, Math.min(256.0, maxSilenceRate)); // 最小0.1倍、最大256.0倍
+        this.minSilenceRate = Math.max(0.001, minSilenceRate); // 最小0.001倍
+        this.maxSilenceRate = Math.max(0.001, Math.min(256.0, maxSilenceRate)); // 最小0.001倍、最大256.0倍
         // 最小が最大を超えないようにする
         if (this.minSilenceRate > this.maxSilenceRate) {
             this.minSilenceRate = this.maxSilenceRate;
@@ -122,7 +122,7 @@ class SilenceCutResampleAlgorithm extends ResampleAlgorithm {
 
     // 最大再生レート倍率を設定
     setMaxSilenceRate(maxSilenceRate) {
-        this.maxSilenceRate = Math.max(0.1, Math.min(256.0, maxSilenceRate));
+        this.maxSilenceRate = Math.max(0.001, Math.min(256.0, maxSilenceRate));
         // 最小が最大を超えないようにする
         if (this.minSilenceRate > this.maxSilenceRate) {
             this.minSilenceRate = this.maxSilenceRate;
@@ -175,16 +175,165 @@ class SilenceCutResampleAlgorithm extends ResampleAlgorithm {
         const numChannels = resampledBuffer.numberOfChannels;
         const sampleRate = resampledBuffer.sampleRate;
 
-        // リサンプリング後の長さが目標より短い場合は、カットできないのでそのまま返す
-        // （無音部分を追加することはできないため）
+        // リサンプリング後の長さが目標より短い場合は、無音部分の再生レートを下げて長くする
         if (resampledLength <= targetLength) {
-            // 再生レート履歴を初期化（基本的な再生レートで埋める）
+            // 無音部分を検出して、無音区間ごとの経過時間に基づいて再生レートを下げる
+            // 無音が始まったら、その無音区間内での経過時間で再生レートを下げていく
+            // 音が鳴ったら再生レートを基本再生レートに戻す
+            
+            // 全体の不足を計算（補正の強さを決定するため）
+            const totalShortage = targetLength - resampledLength;
+            // 補正の強さを全体の不足に基づいて決定
+            // 不足が大きいほど補正を強く、不足が小さいほど補正をほどほどに
+            const relativeShortage = targetLength > 0 ? Math.min(totalShortage / targetLength, 1.0) : 0;
+            // 補正の強さ係数（不足が大きいほど大きくなる、補正の強さパラメータも考慮）
+            const correctionFactor = 0.3 + (relativeShortage * 0.7) * (1.0 + this.silenceCorrectionStrength);
+            
+            // 先頭から順に処理して、実際に必要な出力長さを計算
+            const outputDataArrays = [];
+            let maxOutputLength = 0;
+            
+            // 再生レート履歴を初期化
             this.rateHistory = [];
-            for (let i = 0; i < resampledLength; i++) {
-                const outputTime = i / sampleRate;
-                this.rateHistory[i] = { time: outputTime, rate: playbackRate };
+
+            for (let channel = 0; channel < numChannels; channel++) {
+                const inputData = resampledBuffer.getChannelData(channel);
+                const outputData = [];
+                
+                let outputIndex = 0;
+                let inputIndex = 0;
+                let currentRate = playbackRate;
+
+                // 先頭から順に処理
+                while (inputIndex < resampledLength) {
+                    // 現在位置から無音部分を検出（ウィンドウサイズ分チェック）
+                    const windowEnd = Math.min(inputIndex + this.windowSize, resampledLength);
+                    const isSilent = this.isSilence(inputData, inputIndex, windowEnd);
+
+                    if (isSilent) {
+                        // 無音部分を検出
+                        let silenceStartIndex = inputIndex;
+                        let silenceEndIndex = inputIndex + this.windowSize;
+                        
+                        // 無音部分の終わりを検出（有音部分が始まるまで）
+                        while (silenceEndIndex < resampledLength) {
+                            const checkEnd = Math.min(silenceEndIndex + this.windowSize, resampledLength);
+                            if (!this.isSilence(inputData, silenceEndIndex, checkEnd)) {
+                                break; // 有音部分が見つかった
+                            }
+                            silenceEndIndex = checkEnd;
+                        }
+                        
+                        // 無音部分の長さ
+                        const silenceLength = silenceEndIndex - silenceStartIndex;
+                        
+                        // 無音区間内での経過時間に基づいて再生レートを下げる
+                        const segmentSize = Math.max(128, Math.floor(this.windowSize / 4));
+                        let silenceProcessedSamples = 0;
+                        
+                        while (silenceProcessedSamples < silenceLength) {
+                            const currentSegmentSize = Math.min(segmentSize, silenceLength - silenceProcessedSamples);
+                            const segmentEndInSilence = silenceProcessedSamples + currentSegmentSize;
+                            
+                            // 無音区間内での経過時間の割合（0.0〜1.0）
+                            const progressInSilence = silenceProcessedSamples / silenceLength;
+                            
+                            // 経過時間に基づいた非線形比率を計算（2乗してより急激に減少）
+                            const progressRatio = Math.pow(progressInSilence, 1.5);
+                            
+                            // 補正の強さを考慮（不足が大きいほど、補正の強さが強いほど、より速く最小値に到達）
+                            const adjustedProgressRatio = Math.min(progressRatio * correctionFactor, 1.0);
+                            
+                            // 無音部分の再生レート倍率を計算（1.0より小さい値にする）
+                            // 経過時間が進むほど、より速く最小再生レート倍率に到達
+                            // minSilenceRateを直接使用（既に0.001倍まで下げられている可能性がある）
+                            const minRateForExtension = Math.max(0.001, this.minSilenceRate); // 最小0.001倍
+                            // 1.0からminRateForExtensionまでの範囲で再生レートを下げる
+                            const silenceRate = 1.0 - (adjustedProgressRatio * (1.0 - minRateForExtension));
+                            currentRate = playbackRate * silenceRate; // 実際の再生レート倍率（1.0より小さい）
+                            
+                            // このセグメントを再生レートでリサンプリング（拡張）
+                            const segmentStartIndex = silenceStartIndex + silenceProcessedSamples;
+                            const segmentEndIndex = silenceStartIndex + segmentEndInSilence;
+                            const segmentOutputLength = Math.floor(currentSegmentSize / silenceRate);
+                            
+                            // セグメントをリサンプリング
+                            for (let i = 0; i < segmentOutputLength; i++) {
+                                const sourcePosition = segmentStartIndex + (i / segmentOutputLength) * currentSegmentSize;
+                                const sourceIndex = Math.floor(sourcePosition);
+                                const fraction = sourcePosition - sourceIndex;
+                                
+                                if (sourceIndex + 1 < segmentEndIndex && sourceIndex + 1 < inputData.length) {
+                                    // 線形補間
+                                    outputData[outputIndex] = inputData[sourceIndex] * (1 - fraction) + 
+                                                               inputData[sourceIndex + 1] * fraction;
+                                } else if (sourceIndex < segmentEndIndex && sourceIndex < inputData.length) {
+                                    outputData[outputIndex] = inputData[sourceIndex];
+                                } else {
+                                    outputData[outputIndex] = 0;
+                                }
+                                
+                                // 再生レート履歴を記録（チャンネル0のみ記録）
+                                if (channel === 0) {
+                                    const outputTime = outputIndex / sampleRate;
+                                    this.rateHistory[outputIndex] = { time: outputTime, rate: currentRate };
+                                }
+                                
+                                outputIndex++;
+                            }
+                            
+                            silenceProcessedSamples += currentSegmentSize;
+                        }
+                        
+                        // 入力位置を無音部分の終わりまで進める
+                        inputIndex = silenceEndIndex;
+                    } else {
+                        // 有音部分はそのままコピー（基本再生レートに戻す）
+                        currentRate = playbackRate;
+                        
+                        // 再生レート履歴を記録（チャンネル0のみ記録）
+                        if (channel === 0) {
+                            const outputTime = outputIndex / sampleRate;
+                            this.rateHistory[outputIndex] = { time: outputTime, rate: currentRate };
+                        }
+                        
+                        outputData[outputIndex] = inputData[inputIndex];
+                        outputIndex++;
+                        inputIndex++;
+                    }
+                }
+
+                outputDataArrays.push(outputData);
+                maxOutputLength = Math.max(maxOutputLength, outputData.length);
             }
-            return resampledBuffer;
+
+            // 出力バッファを作成（実際に必要な長さ）
+            const outputBuffer = this.audioContext.createBuffer(
+                numChannels,
+                maxOutputLength,
+                sampleRate
+            );
+
+            // 各チャンネルのデータを出力バッファにコピー
+            for (let channel = 0; channel < numChannels; channel++) {
+                const outputData = outputBuffer.getChannelData(channel);
+                const sourceData = outputDataArrays[channel];
+                
+                for (let i = 0; i < sourceData.length; i++) {
+                    outputData[i] = sourceData[i];
+                }
+                // 残りは0で埋める（他のチャンネルが長い場合）
+                for (let i = sourceData.length; i < maxOutputLength; i++) {
+                    outputData[i] = 0;
+                }
+            }
+
+            // 再生レート履歴を実際の出力長さに合わせて調整
+            if (this.rateHistory.length > maxOutputLength) {
+                this.rateHistory = this.rateHistory.slice(0, maxOutputLength);
+            }
+            
+            return outputBuffer;
         }
 
         // 無音部分を検出して、無音区間ごとの経過時間に基づいて再生レートを上げる

@@ -34,10 +34,9 @@ class UIController {
         this.showRateBtn = document.getElementById('show-rate-btn');
         this.originalSpeakerBtn = document.getElementById('original-speaker-btn');
         this.processedSpeakerBtn = document.getElementById('processed-speaker-btn');
-        this.originalLevelBar = document.getElementById('original-level-bar');
-        this.processedLevelBar = document.getElementById('processed-level-bar');
-        this.originalLevelMeter = document.getElementById('original-level-meter');
-        this.processedLevelMeter = document.getElementById('processed-level-meter');
+        // レベルメーターコンポーネントを初期化（audioPlayerは後で設定）
+        this.originalLevelMeter = null;
+        this.processedLevelMeter = null;
         this.correctionProgressContainer = document.getElementById('correction-progress-container');
         this.correctionProgressBar = document.getElementById('correction-progress-bar');
         this.correctionProgressText = document.getElementById('correction-progress-text');
@@ -223,6 +222,10 @@ class UIController {
             this.slowSpeech.originalBuffer = await this.slowSpeech.audioContext.decodeAudioData(arrayBuffer);
             this.slowSpeech.audioProcessor = new AudioProcessor(this.slowSpeech.audioContext);
             this.slowSpeech.audioPlayer = new AudioPlayer(this.slowSpeech.audioContext);
+            
+            // レベルメーターコンポーネントを初期化
+            this.originalLevelMeter = new LevelMeter('original', this.slowSpeech.audioPlayer, true);
+            this.processedLevelMeter = new LevelMeter('processed', this.slowSpeech.audioPlayer, false);
             
             // 元波形を表示
             if (this.slowSpeech.originalWaveformViewer) {
@@ -454,7 +457,7 @@ class UIController {
             value = 1.0;
         }
         // 範囲を制限
-        value = Math.max(0.1, Math.min(256.0, value));
+        value = Math.max(0.001, Math.min(256.0, value));
         
         if (this.slowSpeech.currentAlgorithm && 
             this.slowSpeech.currentAlgorithm instanceof SilenceCutResampleAlgorithm) {
@@ -480,7 +483,7 @@ class UIController {
             value = 4.0;
         }
         // 範囲を制限
-        value = Math.max(0.1, Math.min(256.0, value));
+        value = Math.max(0.001, Math.min(256.0, value));
         
         if (this.slowSpeech.currentAlgorithm && 
             this.slowSpeech.currentAlgorithm instanceof SilenceCutResampleAlgorithm) {
@@ -681,6 +684,9 @@ class UIController {
             
             // プログレスバーを更新
             this.updateProgress(progressPercent, `補正中... (${iteration + 1}/${maxIterations}) 残り: ${currentDiff.toFixed(2)}秒`);
+            
+            // 波形を更新（視覚的な進捗表示）
+            this.slowSpeech.drawWaveforms();
 
             // 目標の長さに十分近い場合は終了
             if (currentDiff < tolerance) {
@@ -706,82 +712,109 @@ class UIController {
 
             // 調整前に前回の値を保存
             const previousMaxSilenceRate = newMaxSilenceRate;
+            const previousMinSilenceRate = newMinSilenceRate;
             const previousCorrectionStrength = newCorrectionStrength;
 
             if (isTooLong) {
-                // 目標より長い場合：大きく上げる（256倍まで）
+                // ===== 目標より長い場合：無音部分を短くする =====
+                // アルゴリズム: silenceRate = minSilenceRate + (progress * (maxSilenceRate - minSilenceRate))
+                // maxSilenceRateを上げると無音部分が短くなる
+                // minSilenceRateは1.0以上を保つ（無音部分の最小再生レート倍率）
+                
                 if (isOvershot && iteration > 0) {
-                    // 目標値を超えてしまった場合は、前回の値と現在の値の中間を取る
+                    // 目標値を超えてしまった場合は、前回の値と現在の値の中間を取る（バイナリサーチ風）
                     newMaxSilenceRate = Math.min(256.0, (newMaxSilenceRate + previousMaxSilenceRate) / 2);
                     newCorrectionStrength = (newCorrectionStrength + previousCorrectionStrength) / 2;
+                    // minSilenceRateは1.0に保つ（変更しない）
+                    if (newMinSilenceRate < 1.0) {
+                        newMinSilenceRate = 1.0;
+                    }
                 } else {
-                    // 初回またはまだ足りない場合：大きく上げる
-                    // 差が大きいほど、より大きく上げる
-                    const aggressiveFactor = iteration === 0 ? 10.0 : (iteration < 3 ? 5.0 : 2.0); // 初回は10倍、3回目まで5倍、それ以降2倍
-                    const increaseAmount = Math.min(diffRatio * aggressiveFactor * 50.0, 200.0); // 最大200.0まで上げる
+                    // 初回またはまだ長い場合：maxSilenceRateを大きく上げる
+                    const aggressiveFactor = iteration === 0 ? 10.0 : (iteration < 3 ? 5.0 : 2.0);
+                    const increaseAmount = Math.min(diffRatio * aggressiveFactor * 50.0, 200.0);
                     newMaxSilenceRate = Math.min(256.0, newMaxSilenceRate + increaseAmount);
                     
+                    // minSilenceRateは1.0以上を保つ（変更しない、または1.0に設定）
+                    if (newMinSilenceRate < 1.0) {
+                        newMinSilenceRate = 1.0;
+                    }
+                    // minSilenceRateは変更しない（maxSilenceRateだけを調整）
+                    
                     // 補正の強さも大きく上げる
-                    const strengthIncrease = Math.min(diffRatio * aggressiveFactor * 2.0, 2.0); // 最大2.0まで
+                    const strengthIncrease = Math.min(diffRatio * aggressiveFactor * 2.0, 2.0);
                     newCorrectionStrength = newCorrectionStrength + strengthIncrease;
                 }
                 
-                // 補正の強さの表示値は1.0に制限（UI表示用）
-                const displayStrength = Math.min(newCorrectionStrength, 1.0);
-                if (this.silenceCorrectionStrengthSlider) {
-                    this.silenceCorrectionStrengthSlider.value = displayStrength.toFixed(2);
+                // 範囲チェック：minSilenceRateは1.0以上、maxSilenceRateより小さい
+                if (newMinSilenceRate < 1.0) {
+                    newMinSilenceRate = 1.0;
                 }
-                if (this.silenceCorrectionStrengthValue) {
-                    // 1.0を超える場合は「1.0+」と表示
-                    if (newCorrectionStrength > 1.0) {
-                        this.silenceCorrectionStrengthValue.textContent = `1.0+ (${newCorrectionStrength.toFixed(2)})`;
-                    } else {
-                        this.silenceCorrectionStrengthValue.textContent = newCorrectionStrength.toFixed(2);
-                    }
+                if (newMinSilenceRate >= newMaxSilenceRate) {
+                    newMinSilenceRate = Math.max(1.0, newMaxSilenceRate - 0.1);
                 }
                 
-                // プログレスは既に更新済み
             } else {
-                // 目標より短い場合：半分に下げる
+                // ===== 目標より短い場合：無音部分を長くする =====
+                // アルゴリズム: silenceRate = 1.0 - (progress * (1.0 - minRateForExtension))
+                // minSilenceRateを下げると無音部分が長くなる
+                // maxSilenceRateはこの処理では使われない（変更不要）
+                
                 if (isOvershot && iteration > 0) {
-                    // 目標値を超えてしまった場合は、前回の値と現在の値の中間を取る
-                    newMaxSilenceRate = Math.max(newMinSilenceRate, (newMaxSilenceRate + previousMaxSilenceRate) / 2);
+                    // 目標値を超えてしまった場合は、前回の値と現在の値の中間を取る（バイナリサーチ風）
+                    newMinSilenceRate = Math.max(0.001, (newMinSilenceRate + previousMinSilenceRate) / 2);
                     newCorrectionStrength = (newCorrectionStrength + previousCorrectionStrength) / 2;
+                    // maxSilenceRateは変更しない（この処理では使われない）
                 } else {
-                    // 初回またはまだ短い場合：半分に下げる
-                    newMaxSilenceRate = Math.max(newMinSilenceRate, newMaxSilenceRate / 2);
-                    // 補正の強さも半分に下げる
-                    newCorrectionStrength = Math.max(0.0, newCorrectionStrength / 2);
-                }
-                
-                // 補正の強さの表示値を更新
-                const displayStrength = Math.min(newCorrectionStrength, 1.0);
-                if (this.silenceCorrectionStrengthSlider) {
-                    this.silenceCorrectionStrengthSlider.value = displayStrength.toFixed(2);
-                }
-                if (this.silenceCorrectionStrengthValue) {
-                    if (newCorrectionStrength > 1.0) {
-                        this.silenceCorrectionStrengthValue.textContent = `1.0+ (${newCorrectionStrength.toFixed(2)})`;
-                    } else {
-                        this.silenceCorrectionStrengthValue.textContent = newCorrectionStrength.toFixed(2);
+                    // 初回またはまだ短い場合：minSilenceRateを積極的に下げる
+                    const aggressiveFactor = iteration === 0 ? 10.0 : (iteration < 3 ? 5.0 : 2.0);
+                    
+                    // minSilenceRateを下げる（0.001倍まで）
+                    if (newMinSilenceRate > 0.001) {
+                        const minDecreaseAmount = Math.min(diffRatio * aggressiveFactor * 0.5, newMinSilenceRate - 0.001);
+                        newMinSilenceRate = Math.max(0.001, newMinSilenceRate - minDecreaseAmount);
                     }
+                    
+                    // maxSilenceRateは変更しない（この処理では使われない）
+                    // ただし、minSilenceRateより大きく保つ必要がある
+                    if (newMaxSilenceRate <= newMinSilenceRate) {
+                        newMaxSilenceRate = Math.min(256.0, newMinSilenceRate + 0.1);
+                    }
+                    
+                    // 補正の強さは上げる（無音部分をより長くするため）
+                    const strengthIncrease = Math.min(diffRatio * aggressiveFactor * 0.5, 1.0);
+                    newCorrectionStrength = Math.min(2.0, newCorrectionStrength + strengthIncrease);
                 }
                 
-                // プログレスは既に更新済み
+                // 範囲チェック：minSilenceRateは0.001以上、maxSilenceRateより小さい
+                if (newMinSilenceRate < 0.001) {
+                    newMinSilenceRate = 0.001;
+                }
+                if (newMinSilenceRate >= newMaxSilenceRate) {
+                    newMinSilenceRate = Math.max(0.001, newMaxSilenceRate - 0.1);
+                }
             }
 
             // 次回の反復用に前回の状態を保存
             previousDuration = processedDuration;
             previousDiff = durationDiff;
             wasTooLong = isTooLong;
-
-            // 再生レート倍率の範囲をチェック
-            if (newMinSilenceRate >= newMaxSilenceRate) {
-                newMinSilenceRate = Math.max(1.0, newMaxSilenceRate - 0.1);
-            }
             
             // 補正の強さの最小値チェック（上限は撤廃）
             newCorrectionStrength = Math.max(0.0, newCorrectionStrength);
+            
+            // UI表示を更新
+            const displayStrength = Math.min(newCorrectionStrength, 1.0);
+            if (this.silenceCorrectionStrengthSlider) {
+                this.silenceCorrectionStrengthSlider.value = displayStrength.toFixed(2);
+            }
+            if (this.silenceCorrectionStrengthValue) {
+                if (newCorrectionStrength > 1.0) {
+                    this.silenceCorrectionStrengthValue.textContent = `1.0+ (${newCorrectionStrength.toFixed(2)})`;
+                } else {
+                    this.silenceCorrectionStrengthValue.textContent = newCorrectionStrength.toFixed(2);
+                }
+            }
         }
 
         // 最終結果を確認
@@ -994,45 +1027,12 @@ class UIController {
     }
 
     updateLevelMeters() {
-        if (!this.slowSpeech.audioPlayer || !this.slowSpeech.audioPlayer.isPlaying) {
-            // 再生していない場合はレベルメータをリセット
-            if (this.originalLevelBar) {
-                this.originalLevelBar.style.height = '0%';
-            }
-            if (this.processedLevelBar) {
-                this.processedLevelBar.style.height = '0%';
-            }
-            return;
+        // レベルメーターコンポーネントを更新
+        if (this.originalLevelMeter) {
+            this.originalLevelMeter.update();
         }
-
-        // 元波形のレベルメータを更新
-        const originalLevels = this.slowSpeech.audioPlayer.getOriginalLevels();
-        if (originalLevels && this.originalLevelBar) {
-            // 平均レベルを計算
-            let sum = 0;
-            for (let i = 0; i < originalLevels.length; i++) {
-                sum += originalLevels[i];
-            }
-            const average = sum / originalLevels.length;
-            const levelPercent = (average / 255) * 100;
-            this.originalLevelBar.style.height = Math.min(100, levelPercent) + '%';
-        } else if (this.originalLevelBar) {
-            this.originalLevelBar.style.height = '0%';
-        }
-
-        // 加工後の波形のレベルメータを更新
-        const processedLevels = this.slowSpeech.audioPlayer.getProcessedLevels();
-        if (processedLevels && this.processedLevelBar) {
-            // 平均レベルを計算
-            let sum = 0;
-            for (let i = 0; i < processedLevels.length; i++) {
-                sum += processedLevels[i];
-            }
-            const average = sum / processedLevels.length;
-            const levelPercent = (average / 255) * 100;
-            this.processedLevelBar.style.height = Math.min(100, levelPercent) + '%';
-        } else if (this.processedLevelBar) {
-            this.processedLevelBar.style.height = '0%';
+        if (this.processedLevelMeter) {
+            this.processedLevelMeter.update();
         }
     }
 
