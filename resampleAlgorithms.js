@@ -84,6 +84,18 @@ class SilenceCutResampleAlgorithm extends ResampleAlgorithm {
         super(audioContext);
         this.silenceThreshold = 0.01; // 無音判定の閾値（RMS）
         this.windowSize = 1024; // 無音検出のウィンドウサイズ（サンプル数）
+        this.minSilenceRate = 1.0; // 無音部分の最小再生レート倍率（ずれが小さい場合、元のレートと同じ）
+        this.maxSilenceRate = 4.0; // 無音部分の最大再生レート倍率（ずれが大きい場合、元のレートの4倍まで）
+    }
+
+    // 無音部分の再生レート倍率を設定
+    setCutRatios(minSilenceRate, maxSilenceRate) {
+        this.minSilenceRate = Math.max(0.1, minSilenceRate); // 最小0.1倍
+        this.maxSilenceRate = Math.max(0.1, Math.min(4.0, maxSilenceRate)); // 最小0.1倍、最大4.0倍
+        // 最小が最大を超えないようにする
+        if (this.minSilenceRate > this.maxSilenceRate) {
+            this.minSilenceRate = this.maxSilenceRate;
+        }
     }
 
     getName() {
@@ -127,15 +139,15 @@ class SilenceCutResampleAlgorithm extends ResampleAlgorithm {
         const numChannels = resampledBuffer.numberOfChannels;
         const sampleRate = resampledBuffer.sampleRate;
 
-        // リサンプリング後の長さが目標より短い場合は、そのまま返す
+        // リサンプリング後の長さが目標より短い場合は、カットできないのでそのまま返す
+        // （無音部分を追加することはできないため）
         if (resampledLength <= targetLength) {
             return resampledBuffer;
         }
 
-        // 無音部分を検出して、カットする位置を決定
-        // 先頭から順に処理して、無音部分をスキップすることで元の長さに近づける
-        // ただし、無音部分が足りない場合は、元の長さより長くなっても構わない
-        const cutLength = resampledLength - targetLength; // カットする必要がある長さ
+        // 無音部分を検出して、ずれに応じて再生レートを段階的に上げる
+        // 先頭から順に処理して、無音部分で再生レートを上げて元の長さに近づける
+        // ずれが大きい場合は大きく、小さい場合は小さく再生レートを上げる
         
         // 先頭から順に処理して、実際に必要な出力長さを計算
         // 各チャンネルで必要な出力長さを計算するため、一時配列を使用
@@ -146,41 +158,91 @@ class SilenceCutResampleAlgorithm extends ResampleAlgorithm {
             const inputData = resampledBuffer.getChannelData(channel);
             const outputData = [];
             
-            let outputIndex = 0; // 出力バッファのインデックス
-            let inputIndex = 0; // 入力バッファのインデックス
-            let cutCount = 0; // 実際にカットした長さ
+            let outputIndex = 0; // 出力バッファのインデックス（目標の長さを保つための位置）
+            let inputIndex = 0; // 入力バッファのインデックス（リサンプリング後のバッファでの位置）
 
             // 先頭から順に処理
             while (inputIndex < resampledLength) {
-                // 残りのカットが必要な長さを計算
-                const remainingCut = cutLength - cutCount;
+                // 現在のずれを計算（元波形の本来の再生位置とのずれ）
+                // 目標の位置 = outputIndex * (targetLength / resampledLength)
+                // 現在の入力位置 = inputIndex
+                // ずれ = inputIndex - outputIndex * (targetLength / resampledLength)
+                const targetPosition = outputIndex * (targetLength / resampledLength);
+                const offset = inputIndex - targetPosition;
                 
-                if (remainingCut <= 0) {
-                    // カットが完了したら、残りをすべてコピー
-                    while (inputIndex < resampledLength) {
-                        outputData[outputIndex] = inputData[inputIndex];
-                        outputIndex++;
-                        inputIndex++;
-                    }
-                    break;
-                }
-
                 // 現在位置から無音部分を検出（ウィンドウサイズ分チェック）
                 const windowEnd = Math.min(inputIndex + this.windowSize, resampledLength);
                 const isSilent = this.isSilence(inputData, inputIndex, windowEnd);
 
-                if (isSilent) {
-                    // 無音部分をスキップ（カット）
-                    // 残りのカット長さを超えないようにする
-                    const skipLength = Math.min(
-                        this.windowSize,
-                        remainingCut,
-                        resampledLength - inputIndex
-                    );
-                    inputIndex += skipLength;
-                    cutCount += skipLength;
+                if (isSilent && offset > 0) {
+                    // 無音部分を検出し、ずれがある場合
+                    // 無音部分全体の終わりを検出
+                    let silenceStartIndex = inputIndex;
+                    let silenceEndIndex = inputIndex + this.windowSize;
+                    
+                    // 無音部分の終わりを検出（有音部分が始まるまで）
+                    while (silenceEndIndex < resampledLength) {
+                        const checkEnd = Math.min(silenceEndIndex + this.windowSize, resampledLength);
+                        if (!this.isSilence(inputData, silenceEndIndex, checkEnd)) {
+                            break; // 有音部分が見つかった
+                        }
+                        silenceEndIndex = checkEnd;
+                    }
+                    
+                    // 無音部分の長さ
+                    const silenceLength = silenceEndIndex - silenceStartIndex;
+                    
+                    // 現在のずれを再計算
+                    const currentTargetPosition = outputIndex * (targetLength / resampledLength);
+                    const currentOffset = silenceStartIndex - currentTargetPosition;
+                    
+                    if (currentOffset <= 0) {
+                        // ずれがなくなったら、残りをコピー
+                        while (inputIndex < resampledLength && outputIndex < targetLength) {
+                            outputData[outputIndex] = inputData[inputIndex];
+                            outputIndex++;
+                            inputIndex++;
+                        }
+                        continue;
+                    }
+                    
+                    // ずれに応じた再生レート倍率を計算
+                    // ずれが大きいほど大きく、小さいほど小さく
+                    const maxOffset = resampledLength - targetLength; // 最大ずれ
+                    const offsetRatio = Math.min(currentOffset / Math.max(maxOffset, 1), 1.0);
+                    
+                    // 無音部分の再生レート倍率を計算
+                    // ずれが大きいほど大きく、小さいほど小さく
+                    // 最小再生レート倍率と最大再生レート倍率は設定可能
+                    // 元の再生レートよりも高くなってもよい
+                    const silenceRate = this.minSilenceRate + (offsetRatio * (this.maxSilenceRate - this.minSilenceRate));
+                    
+                    // 無音部分を再生レート倍率でリサンプリング（短縮）
+                    // 再生レートが高いほど、出力されるサンプル数が少なくなる
+                    const silenceOutputLength = Math.floor(silenceLength / silenceRate);
+                    
+                    // 無音部分をリサンプリング
+                    for (let i = 0; i < silenceOutputLength; i++) {
+                        const sourcePosition = silenceStartIndex + (i / silenceOutputLength) * silenceLength;
+                        const sourceIndex = Math.floor(sourcePosition);
+                        const fraction = sourcePosition - sourceIndex;
+                        
+                        if (sourceIndex + 1 < silenceEndIndex) {
+                            // 線形補間
+                            outputData[outputIndex] = inputData[sourceIndex] * (1 - fraction) + 
+                                                       inputData[sourceIndex + 1] * fraction;
+                        } else if (sourceIndex < silenceEndIndex) {
+                            outputData[outputIndex] = inputData[sourceIndex];
+                        } else {
+                            outputData[outputIndex] = 0;
+                        }
+                        outputIndex++;
+                    }
+                    
+                    // 入力位置を無音部分の終わりまで進める
+                    inputIndex = silenceEndIndex;
                 } else {
-                    // 有音部分はコピー
+                    // 有音部分はそのままコピー
                     outputData[outputIndex] = inputData[inputIndex];
                     outputIndex++;
                     inputIndex++;

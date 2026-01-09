@@ -39,12 +39,26 @@
                     <option value="silence-cut">音の長さを保つように無音をカット</option>
                 </select>
             </div>
+            <div id="cut-ratio-controls" class="cut-ratio-controls hidden">
+                <div class="cut-ratio-info">
+                    <label>無音部分の再生レート倍率:</label>
+                    <div class="cut-ratio-values">
+                        <span>最小: <span id="min-cut-ratio-value">1.00</span></span>
+                        <span>最大: <span id="max-cut-ratio-value">4.00</span></span>
+                    </div>
+                    <button id="adjust-cut-ratio-btn" class="btn btn-small" disabled>目標の長さに補正</button>
+                </div>
+            </div>
         </div>
 
         <div class="rate-controls">
             <div class="rate-info">
                 <label for="playback-rate">再生レート:</label>
-                <span id="playback-rate-value">0.70</span>
+                <div class="rate-value-controls">
+                    <button id="rate-decrease-btn" class="btn btn-small rate-btn" disabled>-0.1</button>
+                    <span id="playback-rate-value">0.70</span>
+                    <button id="rate-increase-btn" class="btn btn-small rate-btn" disabled>+0.1</button>
+                </div>
             </div>
             <div class="slider-container">
                 <input type="range" id="playback-rate" class="slider" min="0.1" max="2.0" step="0.01" value="0.70" disabled>

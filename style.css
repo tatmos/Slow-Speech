@@ -173,6 +173,49 @@ header h1 {
     cursor: not-allowed;
 }
 
+.cut-ratio-controls {
+    margin-top: 15px;
+    padding: 15px;
+    background: #fff;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+}
+
+.cut-ratio-controls.hidden {
+    display: none;
+}
+
+.cut-ratio-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.cut-ratio-info label {
+    font-weight: 600;
+    color: #333;
+}
+
+.cut-ratio-values {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    font-size: 13px;
+}
+
+.cut-ratio-values span {
+    font-family: monospace;
+}
+
+#min-cut-ratio-value,
+#max-cut-ratio-value {
+    font-weight: 600;
+    color: #667eea;
+    margin-left: 5px;
+}
+
 .rate-controls {
     background: #f8f9fa;
     padding: 20px;
@@ -192,10 +235,24 @@ header h1 {
     color: #333;
 }
 
+.rate-value-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 #playback-rate-value {
     font-weight: 600;
     color: #667eea;
     font-size: 1.1em;
+    min-width: 50px;
+    text-align: center;
+}
+
+.rate-btn {
+    padding: 6px 12px;
+    font-size: 14px;
+    min-width: 50px;
 }
 
 .slider-container {
