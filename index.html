@@ -41,10 +41,37 @@
             </div>
             <div id="cut-ratio-controls" class="cut-ratio-controls hidden">
                 <div class="cut-ratio-info">
-                    <label>無音部分の再生レート倍率:</label>
-                    <div class="cut-ratio-values">
-                        <span>最小: <span id="min-cut-ratio-value">1.00</span></span>
-                        <span>最大: <span id="max-cut-ratio-value">4.00</span></span>
+                    <div class="cut-ratio-header">
+                        <label>無音部分の再生レート倍率:</label>
+                        <div class="cut-ratio-values">
+                            <span>最小: <input type="number" id="min-cut-ratio-value" class="cut-ratio-input" min="0.1" max="256.0" step="0.01" value="1.00" disabled></span>
+                            <span>最大: <input type="number" id="max-cut-ratio-value" class="cut-ratio-input" min="0.1" max="256.0" step="0.01" value="4.00" disabled></span>
+                        </div>
+                        <button id="detail-settings-btn" class="btn btn-small btn-toggle" disabled>詳細設定 ▼</button>
+                    </div>
+                    <div id="detail-settings" class="detail-settings hidden">
+                        <div class="max-silence-rate-controls">
+                            <label for="max-silence-rate">最大再生レート倍率:</label>
+                            <div class="slider-container-small">
+                                <input type="range" id="max-silence-rate" class="slider" min="1.0" max="256.0" step="1.0" value="4.0" disabled>
+                                <div class="slider-labels-small">
+                                    <span>1.0</span>
+                                    <span id="max-silence-rate-value">4.0</span>
+                                    <span>256.0</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="silence-correction-strength-controls">
+                            <label for="silence-correction-strength">無音区間の補正の強さ:</label>
+                            <div class="slider-container-small">
+                                <input type="range" id="silence-correction-strength" class="slider" min="0.0" max="1.0" step="0.01" value="0.50" disabled>
+                                <div class="slider-labels-small">
+                                    <span>弱い (0.0)</span>
+                                    <span id="silence-correction-strength-value">0.50</span>
+                                    <span>強い (1.0)</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <button id="adjust-cut-ratio-btn" class="btn btn-small" disabled>目標の長さに補正</button>
                 </div>
@@ -56,7 +83,7 @@
                 <label for="playback-rate">再生レート:</label>
                 <div class="rate-value-controls">
                     <button id="rate-decrease-btn" class="btn btn-small rate-btn" disabled>-0.1</button>
-                    <span id="playback-rate-value">0.70</span>
+                    <input type="number" id="playback-rate-value" class="rate-value-input" min="0.1" max="2.0" step="0.01" value="0.70" disabled>
                     <button id="rate-increase-btn" class="btn btn-small rate-btn" disabled>+0.1</button>
                 </div>
             </div>

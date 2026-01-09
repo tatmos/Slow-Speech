@@ -85,17 +85,32 @@ class SilenceCutResampleAlgorithm extends ResampleAlgorithm {
         this.silenceThreshold = 0.01; // 無音判定の閾値（RMS）
         this.windowSize = 1024; // 無音検出のウィンドウサイズ（サンプル数）
         this.minSilenceRate = 1.0; // 無音部分の最小再生レート倍率（ずれが小さい場合、元のレートと同じ）
-        this.maxSilenceRate = 4.0; // 無音部分の最大再生レート倍率（ずれが大きい場合、元のレートの4倍まで）
+        this.maxSilenceRate = 4.0; // 無音部分の最大再生レート倍率（デフォルト4.0、最大256.0まで）
+        this.silenceCorrectionStrength = 0.5; // 無音区間の補正の強さ（0.0〜1.0、デフォルト0.5）
     }
 
     // 無音部分の再生レート倍率を設定
     setCutRatios(minSilenceRate, maxSilenceRate) {
         this.minSilenceRate = Math.max(0.1, minSilenceRate); // 最小0.1倍
-        this.maxSilenceRate = Math.max(0.1, Math.min(4.0, maxSilenceRate)); // 最小0.1倍、最大4.0倍
+        this.maxSilenceRate = Math.max(0.1, Math.min(256.0, maxSilenceRate)); // 最小0.1倍、最大256.0倍
         // 最小が最大を超えないようにする
         if (this.minSilenceRate > this.maxSilenceRate) {
             this.minSilenceRate = this.maxSilenceRate;
         }
+    }
+
+    // 最大再生レート倍率を設定
+    setMaxSilenceRate(maxSilenceRate) {
+        this.maxSilenceRate = Math.max(0.1, Math.min(256.0, maxSilenceRate));
+        // 最小が最大を超えないようにする
+        if (this.minSilenceRate > this.maxSilenceRate) {
+            this.minSilenceRate = this.maxSilenceRate;
+        }
+    }
+
+    // 無音区間の補正の強さを設定（0.0〜1.0、内部的には1.0を超える値も許可可能）
+    setSilenceCorrectionStrength(strength) {
+        this.silenceCorrectionStrength = Math.max(0.0, strength); // 上限を撤廃（1.0を超える値も許可）
     }
 
     getName() {
@@ -211,11 +226,28 @@ class SilenceCutResampleAlgorithm extends ResampleAlgorithm {
                     const maxOffset = resampledLength - targetLength; // 最大ずれ
                     const offsetRatio = Math.min(currentOffset / Math.max(maxOffset, 1), 1.0);
                     
+                    // 無音区間の長さも考慮（長いほどより積極的にカット）
+                    // 無音区間が長いほど、より速く最大再生レート倍率に到達させる
+                    const silenceDurationSeconds = silenceLength / sampleRate; // 無音区間の長さ（秒）
+                    const longSilenceThreshold = 0.3; // 長い無音区間の閾値（秒）
+                    const silenceLengthFactor = Math.min(silenceDurationSeconds / longSilenceThreshold, 1.0); // 0.0〜1.0
+                    
+                    // ずれの比率を非線形関数に変換（2乗してより急激に増加させる）
+                    // 無音区間が長いほど、さらに急激に増加させる（補正の強さパラメータを使用）
+                    const baseNonlinearRatio = Math.pow(offsetRatio, 2); // 基本は2乗
+                    // 補正の強さに応じて最大補正量を動的に増やす（補正の強さが1.0のとき、最大補正量は2.0になる）
+                    // 補正の強さが1.0を超える場合も考慮（内部的に1.0を超える値を許可）
+                    const baseMaxSilenceBoost = 0.5; // 基本の最大補正量
+                    const extendedMaxSilenceBoost = baseMaxSilenceBoost + (this.silenceCorrectionStrength * 1.5); // 補正の強さに応じて最大3.5まで増加可能
+                    const maxSilenceBoost = extendedMaxSilenceBoost;
+                    const silenceBoost = Math.pow(silenceLengthFactor, 0.5) * maxSilenceBoost; // 無音区間が長いほど補正を加える（補正の強さはmaxSilenceBoostに反映済み）
+                    const combinedNonlinearRatio = Math.min(baseNonlinearRatio + silenceBoost * offsetRatio, 1.0);
+                    
                     // 無音部分の再生レート倍率を計算
-                    // ずれが大きいほど大きく、小さいほど小さく
+                    // ずれが大きいほど、無音区間が長いほど、より速く最大再生レート倍率に到達
                     // 最小再生レート倍率と最大再生レート倍率は設定可能
                     // 元の再生レートよりも高くなってもよい
-                    const silenceRate = this.minSilenceRate + (offsetRatio * (this.maxSilenceRate - this.minSilenceRate));
+                    const silenceRate = this.minSilenceRate + (combinedNonlinearRatio * (this.maxSilenceRate - this.minSilenceRate));
                     
                     // 無音部分を再生レート倍率でリサンプリング（短縮）
                     // 再生レートが高いほど、出力されるサンプル数が少なくなる
