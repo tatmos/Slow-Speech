@@ -10,6 +10,7 @@ class OriginalWaveformViewer {
         this.isDragging = false;
         this.dragType = null; // 'start' or 'end'
         this.onRangeChange = null; // コールバック関数
+        this.onRangeCommit = null; // ドラッグ確定時のコールバック関数
         this.hoverTopArea = false; // 上部30%エリアをホバーしているか
         
         this.setupEventListeners();
@@ -254,6 +255,9 @@ class OriginalWaveformViewer {
             this.dragType = null;
             this.canvas.style.cursor = 'default';
             this.unlockScroll();
+            if (this.onRangeCommit) {
+                this.onRangeCommit(this.startTime, this.endTime);
+            }
         }
     }
 
@@ -471,4 +475,3 @@ class OriginalWaveformViewer {
         return count > 0 ? sum / count : 0;
     }
 }
-
