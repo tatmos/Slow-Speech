@@ -26,6 +26,7 @@ class AudioPlayer {
     // offsetSeconds: 再生開始位置（秒）- 加工後のバッファの位置
     playPreview(originalBuffer, processedBuffer, offsetSeconds = 0) {
         if (!processedBuffer || this.isPlaying) return false;
+        if (processedBuffer.duration <= 0) return false;
         // originalBufferはnullでもOK（元波形がミュートの場合）
 
         try {
@@ -63,8 +64,10 @@ class AudioPlayer {
                 
                 // 元波形の再生開始（加工後の波形と同期）
                 // 元波形の対応する位置を計算
-                const originalOffset = originalBuffer.duration > 0 ? (offset * originalBuffer.duration / processedBuffer.duration) % originalBuffer.duration : 0;
-                originalSource.start(startAt, originalOffset);
+                if (originalBuffer.duration > 0 && processedBuffer.duration > 0) {
+                    const originalOffset = (offset * originalBuffer.duration / processedBuffer.duration) % originalBuffer.duration;
+                    originalSource.start(startAt, originalOffset);
+                }
             }
             
             // 加工後のバッファを再生
