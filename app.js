@@ -28,7 +28,11 @@ class SlowSpeech {
         const processedRuler = document.getElementById('ruler-processed');
         
         this.originalWaveformViewer = new OriginalWaveformViewer(originalCanvas, originalRuler);
-        this.originalWaveformViewer.onRangeChange = async (startTime, endTime) => {
+        this.originalWaveformViewer.onRangeChange = (startTime, endTime) => {
+            this.useRangeStart = startTime;
+            this.useRangeEnd = endTime;
+        };
+        this.originalWaveformViewer.onRangeCommit = async (startTime, endTime) => {
             this.useRangeStart = startTime;
             this.useRangeEnd = endTime;
             await this.updateBuffers();
