@@ -232,6 +232,17 @@ class UIController {
                 this.stopBtn.disabled = true;
             }
 
+            // 新しいAudioContext作成前に既存の再生/処理を停止・解放
+            if (this.slowSpeech.audioPlayer) {
+                this.slowSpeech.audioPlayer.stopPreview();
+            }
+            if (this.slowSpeech.audioContext && this.slowSpeech.audioContext.state !== 'closed') {
+                await this.slowSpeech.audioContext.close();
+            }
+            this.slowSpeech.audioContext = null;
+            this.slowSpeech.audioPlayer = null;
+            this.slowSpeech.audioProcessor = null;
+
             // ファイル名を保存用ファイル名に反映
             if (this.filenameInput && file && file.name) {
                 const originalName = file.name;
